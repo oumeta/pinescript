@@ -1,0 +1,170 @@
+//@version=4
+strategy(shorttitle="DMI Modified Strategy", title="DMI Modified Strategy", overlay=true,default_qty_type=strategy.cash, default_qty_value=10000, initial_capital=10000)
+
+// This work is licensed under a Creative Commons Attribution-ShareAlike 4.0 International License https://creativecommons.org/licenses/by-sa/4.0/
+// © dman103
+//This is a Directional Movement Index (DMI) with a twist, instead of plotting the positive direction of +DI and negative direction for -DI, we subtract the +DI with the -DI on scales of 100 to -100.
+//The result is plotted with a oscillator to identify the current trend.
+//DMI Modified supports multiple moving averages (default is JMA with length of 3). You can disable moving averages smoothing in settings.
+//== About the indicator ==
+//The Directional Movement Index, or DMI, is an indicator developed by J. Welles Wilder in 1978 that identifies in which direction the price of an asset is moving.
+//The indicator does this by comparing prior highs and lows and drawing two lines: a positive directional movement line (+DI) and a negative directional movement line (-DI)
+//In our case we do not draw the two lines, but the result of the subtraction of the two. 
+// == Oscillator Colors ==
+// GREEN :          Asset is above zero line with a strong up trend.
+// LIGHT GREEN: Asset is above zero line but up trending might be weakening.
+// RED :              Asset is below zero line with a strong downtrend.
+// LIGHT RED: Asset is below zero line but down trending might be weakening.
+
+// == Notes ==
+// Can also be used to find divergences.
+// Bar coloring is disabled by default
+
+// Like if you like and Enjoy! Follow for more upcoming indicators/strategies.
+
+length = input(7, title="Length", minval=0)
+smoothing_length=input(3, title="Smoothing length")
+ma_select = input(title="Moving Average Type", defval="JMA", options=["NONE","SMA","SMMA" ,"EMA", "WMA", "HMA", "JMA"])
+MA_selector(src, length) =>
+    ma = 0.0
+    if ma_select == "NONE"
+        ma:=src
+        ma
+    if ma_select == "SMA"
+        ma := sma(src, length)
+        ma
+    if ma_select == "SMMA"
+        smma = float (0.0)
+        smaval=sma(src, length)
+        smma := na(smma[1]) ? smaval : (smma[1] * (length - 1) + src) / length
+        ma := smma
+    if ma_select == "EMA"
+        ma := ema(src, length)
+        ma
+
+    if ma_select == "WMA"
+        ma := wma(src, length)
+        ma
+    if ma_select == "HMA"
+        ma := hma(src,length)
+        ma
+    if ma_select == "JMA"
+        beta = 0.45*(length-1)/(0.45*(length-1)+2)
+        alpha = beta
+        tmp0 = 0.0, tmp1 = 0.0, tmp2 = 0.0, tmp3 = 0.0, tmp4 = 0.0
+        tmp0 := (1-alpha)*src + alpha*nz(tmp0[1])
+        tmp1 := (src - tmp0[0])*(1-beta) + beta*nz(tmp1[1])
+        tmp2 := tmp0[0] + tmp1[0]
+        tmp3 := (tmp2[0] - nz(tmp4[1]))*((1-alpha)*(1-alpha)) + (alpha*alpha)*nz(tmp3[1])
+        tmp4 := nz(tmp4[1]) + tmp3[0]
+        ma := tmp4
+        ma
+    
+    ma
+color_bars=input(false,title="Color bars")
+//  Colors
+col_grow_above = #26A69A
+col_grow_below = #FFCDD2
+col_fall_above = #AAFFDB
+col_fall_below = #EF5350
+
+dirmov(len,up_band,low_band) =>
+	up = change(highest(up_band,len)) 
+	down = -change(lowest(low_band,len))
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(up > down and up > 0 ? up : 0, len) / truerange)
+	minus = fixnan(100 * rma(down > up and down > 0 ? down : 0, len) / truerange)
+	[plus, minus]
+
+[plus, minus]= dirmov(length,high,low)
+result= plus-minus
+result:=MA_selector(result,smoothing_length)*10
+
+colors= result > 0 and result>result[1] ? col_grow_above : result > 0 and result<result[1] ? col_fall_above : result<0 and result>result[1] ? col_grow_below : result<0 and result<result[1] ? col_fall_below : color.white
+dmi=plot(result, style=plot.style_line, color=colors, linewidth=2, title="DI+-")
+barcolor(color_bars ? colors : na)
+zero_line=plot(0, color=color.white, title="0-Line",transp=60)
+fill (dmi,zero_line,color=colors)
+
+long =  result > 0 and result>result[1]
+short = result< 0 and result<result[1]
+// strategy.entry("B", true,when=long)
+// strategy.entry("S",false,when=short)
+allow_short = input(true,title="Allow Short")
+closeStatus =  strategy.openprofit > 0 ? "win" : "lose"
+
+
+//, comment=strategy.position_size<0 ? closeStatus : na)
+strategy.close("short",when=long,comment=closeStatus)
+strategy.close("long",when=short,comment=closeStatus)
+strategy.entry("long", true, when = long)
+if (allow_short)
+    strategy.entry("short",false, when = short)
+
+plotshape(crossover(result,0) ? result : na, style=shape.circle, color=color.lime,location=location.absolute,size=size.tiny,transp=65)
+plotshape(crossunder(result,0) ? result : na, style=shape.circle, color=color.red,location=location.absolute,size=size.tiny,transp=65)
+
+
+
+// obv_periods=input(10, title="Time Periods")
+// x=(2*close-high-low)/(high-low)
+// tva=sum(volume*x,obv_periods)
+// tv=sum(volume,obv_periods)
+// va=100*tva/tv
+// zl=plot(0, color=gray, title="ZeroLine")
+// vac=color.gray
+// val2=plot(va, color=vac, style=histogram, title="VAPI Histogram")
+
+// us=va<0?0:(va==0?va[1]  :va), ls=va>0?0:(va==0?va[1]:va)
+// ux=plot(us, color=color.gray, style=circles, title="DummyU")
+// lx=plot(ls, color=color.gray, style=circles, title="DummyL")
+// fill(ux,val2,color=color.red, transp=50, title="NegativeFill")
+// fill(lx,val2,color=color.lime, transp=50, title="PositiveFill")
+// plot(va, color=color.gray, linewidth=2, title="VAPI Osc")
+
+
+
+
+//////// CCI>>
+length1 = input(20, minval=1, title="CCI")
+
+//////// EMA>>
+ma_length = input(9, minval=1, title="EMA")
+
+//////// SRC>>
+src = input(close, title="Source")
+
+//_______________________________________________________________________________
+
+Stochlength = 14, minval=1
+StochOverBought = 80
+StochOverSold = 20
+smoothK = 3
+smoothD = 3
+k = sma(stoch(close, high, low, Stochlength), smoothK)
+d = sma(k, smoothD)
+
+//_______________________________________________________________________________
+
+ma1 = sma(src, length1)
+cci1 = (src - ma1) / (0.015 * dev(src, length1))
+plot(cci1, color=color.blue, linewidth=1)
+plot(cci1, linewidth=1)
+plot(ema(cci1, ma_length), color=#ffffff, transp=0, linewidth=1)
+
+//_______________________________________________________________________________
+
+plotColour = (cci1 > ema(cci1, ma_length)) ? #00ff00 : #ff0000
+plotCCIEMA = plot(series=cci1, color=plotColour, transp=0, linewidth=2)
+plotHoriz  = plot(series=0, color=color.blue)
+fill(plotCCIEMA, plotHoriz, color=color.blue, transp=100)
+
+//_______________________________________________________________________________
+
+band0 = hline(200, color=#aa8000)
+band1 = hline(75, color=#aa8000)
+band2 = hline(0, color=#ffe500, title="Base")
+band3 = hline(-75, color=#aa8000)
+band4 = hline(-200, color=#aa8000)
+fill(band1, band3, color=#aa8000, transp=80)
+

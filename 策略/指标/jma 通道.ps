@@ -1,0 +1,56 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ChuckBanger
+
+//@version=5
+indicator('Jurik Moving Average Crossover Strategy [ChuckBanger]', shorttitle='JMAC CB', overlay=true)
+length = input(title='Length', defval=30)
+phase = input(title='Phase', defval=0)
+power = input(title='Power', defval=2)
+src = input(title='Source', defval=close)
+highlight = input(title='Highlight Up/Down', defval=true)
+
+atrLength = input(title='ATR Length', defval=30)
+mult = input(title='ATR Multiplyer', defval=1.5)
+
+fastLength = input(title='Fast Length', defval=5)
+fastPhase = input(title='Fast Phase', defval=100)
+fastPower = input(title='Fast Power', defval=2)
+
+calc_jma(_src, _length, _phase, _power) =>
+    phaseRatio = _phase < -100 ? 0.5 : _phase > 100 ? 2.5 : _phase / 100 + 1.5
+
+    beta = 0.45 * (_length - 1) / (0.45 * (_length - 1) + 2)
+    alpha = math.pow(beta, _power)
+
+    e0 = 0.0
+    e0 := (1 - alpha) * _src + alpha * nz(e0[1])
+
+    e1 = 0.0
+    e1 := (_src - e0) * (1 - beta) + beta * nz(e1[1])
+
+    jma = 0.0
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+
+    jma := e2 + nz(jma[1])
+    jma
+
+jma = calc_jma(src, length, phase, power)
+jmaColor = highlight ? jma > jma[1] ? color.aqua : color.maroon : color.blue
+plot(jma, title='JMA', linewidth=2, color=jmaColor, transp=0)
+
+atr_ = ta.atr(atrLength)
+upper = jma + atr_ * mult
+lower = jma - atr_ * mult
+plot(upper)
+plot(lower)
+
+fastJma = calc_jma(src, fastLength, fastPhase, fastPower)
+
+plot(fastJma, color=color.new(color.gray, 0))
+
+plot(ta.cross(fastJma, jma) ? jma : na, style=plot.style_circles, linewidth=5, color=color.new(color.orange, 0), title='JMA crosses')
+plot(ta.crossunder(fastJma, upper) ? upper + atr_ / 4 : na, style=plot.style_circles, linewidth=5, color=color.new(color.red, 0), title='JMA Upper crossunder')
+plot(ta.crossover(fastJma, lower) ? lower - atr_ / 4 : na, style=plot.style_circles, linewidth=5, color=color.new(color.lime, 0), title='JMA Lower crossover')
+
+

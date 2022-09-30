@@ -1,0 +1,188 @@
+//@version=5
+
+////Arranged by @ClassicScott
+
+//The deets:
+
+//20 period, 50 period, and 100 period ALMAs. Fast, Slow and Trend. All customizable independent of each other. All three also change color based on their own individual trends.
+
+//Bullish momentum is identified when price is closing above the Dominant Momentum MA, and the Short-term MA is above the Dominant MA. Vice versa for bearish momemntum.
+//There are in-between points when a trend is not identified, and this is when price closes above or below the Trend ma, but the Short-term MA has not crossed it.
+//Background color is used to identify general momentum, and there is an input for turning this on and off.
+
+//There are two types of trade exits (or aggressive entries) now.
+//Early trade exits are based on closing price and the short-term momentum MA.
+//"Patiently Waiting" exit symbols are triggered with respect to the closing price and the mid-term momentum MA.
+//There are inputs to toggle both of these on and off.
+
+//Lastly, there are alert conditions set for bullish and bearish momentum, and all four exits
+
+//Enjoy the indicator! I think with some sort of bands or channels for those times when the market is rangebound or in chop, you could really crush it with this.
+
+
+indicator('ALMA Trend Detector', shorttitle='+ ALMA', overlay=true, timeframe='')
+
+
+////Background and Exit/Enter Trade Symbol Inputs
+bg = input.bool(defval=true, title='Momentum Background', group='Background & Exit Signals')
+eesymbol = input.bool(defval=true, title='Early Trade Exit', group='Background & Exit Signals')
+esymbol = input.bool(defval=true, title='Patient Trade Exit', group='Background & Exit Signals')
+
+
+////Source Selection & ALMA Variables
+
+//Quick ALMA
+qshow = input.bool(title='Yes or No?', defval=false, group='Quick ALMA')
+qsource = input.source(close, title='Source', group='Quick ALMA')
+qperiod = input.int(title='Period', defval=1, group='Quick ALMA')
+qoffset = input.float(title='Offset', step=0.025, defval=0.85, group='Quick ALMA')
+qsigma = input.float(title='Sigma', step=0.5, defval=6, group='Quick ALMA')
+
+qalma = ta.alma(qsource, qperiod, qoffset, qsigma)
+
+qalma_up_color = input.color(#66bb6a, 'Going Up!', group='Quick ALMA')
+qalma_down_color = input.color(#ef5350, 'Going Down :(', group='Quick ALMA')
+qcolor = qalma > qalma[1] ? qalma_up_color : qalma_down_color
+
+//Short-term Momentum ALMA
+stshow = input.bool(title='Yes or No?', defval=true, group='Short-term ALMA')
+stsource = input.source(close, title='Source', group='Short-term ALMA')
+stperiod = input.int(title='Period', defval=21, group='Short-term ALMA')
+stoffset = input.float(title='Offset', step=0.025, defval=0.8, group='Short-term ALMA')
+stsigma = input.float(title='Sigma', step=0.5, defval=6, group='Short-term ALMA')
+
+stalma = ta.alma(stsource, stperiod, stoffset, stsigma)
+
+stalma_up_color = input.color(#66bb6a, 'Going Up!', group='Short-term ALMA')
+stalma_down_color = input.color(#ef5350, 'Going Down :(', group='Short-term ALMA')
+stcolor = close > stalma and close[1] > stalma ? stalma_up_color : stalma_down_color
+
+//Mid-term Momentum ALMA
+mtshow = input.bool(title='Yes or No?', defval=true, group='Mid-term ALMA')
+mtsource = input.source(close, title='Source', group='Mid-term ALMA')
+mtperiod = input.int(title='Period', defval=55, group='Mid-term ALMA')
+mtoffset = input.float(title='Offset', step=0.025, defval=0.9, group='Mid-term ALMA')
+mtsigma = input.float(title='Sigma', step=0.5, defval=4.5, group='Mid-term ALMA')
+
+mtalma = ta.alma(mtsource, mtperiod, mtoffset, mtsigma)
+
+mtalma_up_color = input.color(#66bb6a, 'Going Up!', group='Mid-term ALMA')
+mtalma_down_color = input.color(#ef5350, 'Going Down :(', group='Mid-term ALMA')
+mtcolor = close[1] > mtalma ? mtalma_up_color : mtalma_down_color
+
+//Dominant Momentum ALMA
+dshow = input.bool(title='Yes or No?', defval=true, group='Dominant ALMA')
+dsource = input.source(close, title='Source', group='Dominant ALMA')
+dperiod = input.int(title='Period', defval=144, group='Dominant ALMA')
+doffset = input.float(title='Offset', step=0.025, defval=0.775, group='Dominant ALMA')
+dsigma = input.float(title='Sigma', step=0.5, defval=4.5, group='Dominant ALMA')
+
+dalma = ta.alma(dsource, dperiod, doffset, dsigma)
+
+dalma_up_color = input.color(#66bb6a, 'Going Up!', group='Dominant ALMA')
+dalma_down_color = input.color(#ef5350, 'Going Down :(', group='Dominant ALMA')
+dcolor = close[1] > dalma ? dalma_up_color : dalma_down_color
+
+
+////ALMA Plots
+plot(qshow ? qalma : na, color=qcolor, title='Quick MA')
+plot(stshow ? stalma : na, color=stcolor, title='Short-term Momentum MA')
+plot(mtshow ? mtalma : na, color=mtcolor, title='Mid-term Momentum MA')
+plot(dshow ? dalma : na, color=dcolor, style=plot.style_stepline, linewidth=2, title='Dominant Momentum MA')
+
+
+////200 PERIOD EMA
+show_ema = input.bool(title='Yes or No?', defval=true, group='200 EMA')
+ema_plot = ta.ema(close, 200)
+ema_up_color = input.color(#66bb6a, 'Much Joy!', group='200 EMA')
+ema_down_color = input.color(#ef5350, 'Teh Sadness :*(', group='200 EMA')
+ema_color = close > ema_plot ? ema_up_color : ema_down_color
+
+plot(show_ema ? ema_plot : na, title='200 EMA', color=ema_color, style=plot.style_circles)
+
+
+////Bands Selection
+
+
+//Bollinger Bands
+bbands = input.bool(title='Yes or No?', defval=true, group='Bollinger Bands')
+bb_mult = input.float(defval=2.0, minval=0.001, maxval=50, step=0.25, title='StdDev', group='Bollinger Bands')
+dev = bb_mult * ta.stdev(mtsource, mtperiod)
+bb_upper = mtalma + dev
+bb_lower = mtalma - dev
+offset = input.int(0, 'Offset', minval=-500, maxval=500, group='Bollinger Bands')
+bb_u_color = input.color(#ef5350, title='Upper Band Color', group='Bollinger Bands')
+bb_l_color = input.color(#66bb6a, title='Lower Band Color', group='Bollinger Bands')
+bb_u_band = plot(bbands ? bb_upper : na, 'BB One Upper', color=bb_u_color, offset=offset, display=display.none)
+bb_l_band = plot(bbands ? bb_lower : na, 'BB One Lower', color=bb_l_color, offset=offset, display=display.none)
+
+bbands_2 = input.bool(title='Second Bollinger Bands?', defval=false, group='Bollinger Bands')
+bb_mult_2 = input.float(defval=1.5, minval=0.001, maxval=50, step=0.25, title='StdDev', group='Bollinger Bands')
+dev_2 = bb_mult_2 * ta.stdev(mtsource, mtperiod)
+bb_upper_2 = mtalma + dev_2
+bb_lower_2 = mtalma - dev_2
+offset_2 = input.int(0, 'Offset', minval=-500, maxval=500, group='Bollinger Bands')
+bb_u_color_2 = input.color(#ef5350, title='Upper Band Color', group='Bollinger Bands')
+bb_l_color_2 = input.color(#66bb6a, title='Lower Band Color', group='Bollinger Bands')
+bb_u_band_2 = plot(bbands_2 ? bb_upper_2 : na, 'BB Two Upper', color=bb_u_color, offset=offset, display=display.none)
+bb_l_band_2 = plot(bbands_2 ? bb_lower_2 : na, 'BB Two Lower', color=bb_l_color, offset=offset, display=display.none)
+
+fill(bb_u_band, bb_u_band_2, color.new(#ef5350, 90), title='Upper BB Fill')
+fill(bb_l_band, bb_l_band_2, color.new(#66bb6a, 90), title='Lower BB Fill')
+
+
+//Keltner Channels
+kc_channels = input.bool(title='Yes or No?', defval=true, group='Keltner Channels')
+kc_mult = input.float(defval=2.0, title='Multiplier', step=0.25, group='Keltner Channels')
+atr_length = input.int(defval=10, title='ATR Period', group='Keltner Channels')
+kc_upper = mtalma + ta.atr(atr_length) * kc_mult
+kc_lower = mtalma - ta.atr(atr_length) * kc_mult
+kc_u_color = input.color(#ef5350, title='Upper KC Color', group='Keltner Channels')
+kc_l_color = input.color(#66bb6a, title='Lower KC Color', group='Keltner Channels')
+kc_u_band = plot(kc_channels ? kc_upper : na, color=kc_u_color, title='KC One Upper', display=display.none)
+kc_l_band = plot(kc_channels ? kc_lower : na, color=kc_l_color, title='KC One Lower', display=display.none)
+
+kc_channels_2 = input.bool(title='Second Keltner Channels?', defval=false, group='Keltner Channels')
+kc_mult_2 = input.float(defval=1.0, title='Multiplier', step=0.25, group='Keltner Channels')
+atr_length_2 = input.int(defval=10, title='ATR Period', group='Keltner Channels')
+kc_upper_2 = mtalma + ta.atr(atr_length_2) * kc_mult_2
+kc_lower_2 = mtalma - ta.atr(atr_length_2) * kc_mult_2
+kc_u_color_2 = input.color(#ef5350, title='Upper KC Color', group='Keltner Channels')
+kc_l_color_2 = input.color(#66bb6a, title='Lower KC Color', group='Keltner Channels')
+kc_u_band_2 = plot(kc_channels_2 ? kc_upper_2 : na, color=kc_u_color, title='KC Two Upper', display=display.none)
+kc_l_band_2 = plot(kc_channels_2 ? kc_lower_2 : na, color=kc_l_color, title='KC Two Lower', display=display.none)
+
+fill(kc_u_band, kc_u_band_2, color.new(#ef5350, 90), title='Upper KC Fill')
+fill(kc_l_band, kc_l_band_2, color.new(#66bb6a, 90), title='Lower KC Fill')
+
+
+////Background Trend Colors & Exit/Entry Signals
+momlong = close > dalma and stalma > dalma
+momshort = close < dalma and stalma < dalma
+earlyexitshort = ta.crossover(close, stalma) and stalma < dalma
+earlyexitlong = ta.crossunder(close, stalma) and stalma > dalma
+exitshort = ta.crossover(close, mtalma) and stalma < dalma
+exitlong = ta.crossunder(close, mtalma) and stalma > dalma
+
+bgcolor(bg and momlong ? color.new(#1b5e20, 95) : na, title='Momentum Long')
+bgcolor(bg and momshort ? color.new(#b71c1c, 95) : na, title='Momentum Short')
+plotshape(eesymbol and earlyexitlong, style=shape.triangledown, size=size.tiny, color=color.new(#ef5350, 0), location=location.top, title='Early Exit Long')
+plotshape(eesymbol and earlyexitshort, style=shape.triangleup, size=size.tiny, color=color.new(#66bb6a, 0), location=location.bottom, title='Early Exit Short')
+plotshape(esymbol and exitlong, style=shape.triangledown, size=size.tiny, color=color.new(#ef5350, 0), location=location.top, title='Patiently Waiting')
+plotshape(esymbol and exitshort, style=shape.triangleup, size=size.tiny, color=color.new(#66bb6a, 0), location=location.bottom, title='Patiently Waiting')
+
+
+////Alert Conditions
+alertcondition(momlong, title='Uptrend', message='This might be the start of an uptrend. Check your chart!')
+alertcondition(momshort, title='Downtrend', message='This might be the start of a downtrend. Check your chart!')
+alertcondition(earlyexitshort, title='Early Exit Short?', message='Maybe exit your short, or take some profits, or look to enter short if momentum is bearish (selling the bounce), or simply do nothing.')
+alertcondition(earlyexitlong, title='Early Exit Long?', message='Maybe exit your long, or take some profits, or look to enter long if momentum is bullish (buying the dip), or simply do nothing.')
+alertcondition(exitshort, title='Exit Short?', message='Maybe exit your short, or take some profits, or look to enter short if momentum is bearish (selling the bounce), or simply do nothing.')
+alertcondition(exitlong, title='Exit Long?', message='Maybe exit your long, or take some profits, or look to enter long if momentum is bullish (buying the dip), or simply do nothing.')
+alertcondition(ta.cross(close, ema_plot), title='200 EMA Cross', message='Price has crossed the 200 EMA.')
+alertcondition(ta.cross(close, bb_upper), title='Bollinger Bands Upper Cross', message='Price has closed above the Upper Bollinger Band.')
+alertcondition(ta.cross(close, bb_lower), title='Bollinger Bands Lower Cross', message='Price has closed below the Lower Bollinger Band.')
+alertcondition(ta.cross(close, kc_upper), title='Keltner Channels Upper Cross', message='Price has closed above the Upper Keltner Channel.')
+alertcondition(ta.cross(close, kc_lower), title='Keltner Channels Lower Cross', message='Price has closed below the Lower Keltner Channel.')
+
+

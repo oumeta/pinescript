@@ -1,0 +1,246 @@
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// @version=5
+//
+// The stochastic indicator has been long used by traders to identify inflection points in the price and to give a direction on Bullish and Bearish bias.
+//
+// This indicator aims to improve on the plots the %K value smoothed using a Jurik Filter instead of a simple moving average. Jurik Smoothing creates a more adaptive K value average price, whilst also providing decent smoothing.
+//
+// As the Jurik Filter is a proprietary and non-open-source implementation, this script uses a common filters library implementation of Jurik MA which is a decent proxy to the actual Jurik MA filter.
+// 
+// Big thanks to LastGuru for making his version freely available. You can find his version of the Jurik Filters in the credits section below
+// 
+// Just like the traditional stochastic indicator, you will find a %K line, Overbought and Oversold levels. 
+// 
+// %D is calculated using the following formula. This idea was borrowed from John Ehler’s stochastic implementation and can be seen below:
+//
+// %D = 0.05 + 0.95 * K[1]
+//
+// In addition to the standard features listed above, there are also the following features:
+// 
+// Oversold / Overbought reversal indicators and signals
+// Bullish / Bearish Divergences – Including Hidden divergences to spot reversals and continuations of trend (Big thanks to the developers of the built-in RSI Divergence indicator)
+// Bullish / Bearish crossover of %K with %D
+// Alerts for all of the above conditions
+// 
+//
+// Credits:
+// Massive shoutout to the following scripts:
+// https://www.tradingview.com/script/kI6YjrIH-CommonFilters/ - LastGuru JurikMA implementation
+// Divergence Indicator – Built into TradingView and coded by TradingView Developers
+//
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+indicator(title="Jurik Smoothed Stochastic - TraderHalai", shorttitle="Jurik Stoch - TraderHalai", max_bars_back=2000)
+
+import lastguru/CommonFilters/2 //Big thanks for LastGuru for his amazing Jurik MA /Common Filters Library
+
+//INPUTS
+
+//Stochastic 
+periodK         = input.int(14,     title="%K Length",              minval=1,                group="Stochastic Settings")
+phaseK          = input.int(0,      title="%K Phase",               minval=-100, maxval=100, group="Stochastic Settings")
+smoothK         = input.int(6,      title="%K Smoothing",           minval=1,                group="Stochastic Settings")
+stochOverbought = input.int(80,     title="Stoch Overbought",       minval=1,                group="Stochastic Settings")
+stochOversold   = input.int(20,     title="Stoch Oversold",         minval=1,                group="Stochastic Settings")
+useSlow         = input.bool(false,  title="Slow (Double Smoothed)",                         group="Stochastic Settings")
+
+//Divergences
+lbR =           input.int(5,        title="Pivot Lookback Right",   minval=1,                group="Divergence Settings")
+lbL =           input.int(5,        title="Pivot Lookback Left",    minval=1,                group="Divergence Settings")
+rangeUpper=     input.int(60,       title="Max of Lookback Range",  minval=5,                group="Divergence Settings")
+rangeLower=     input.int(5,        title="Min of Lookback Range",  minval=1,                group="Divergence Settings")
+
+
+//Display
+plotLabels =    input.bool(true,   title="Plot Labels",                                     group='Display Settings')
+plotBull =      input.bool(true,   title="Plot Bullish",                                    group='Display Settings')
+plotHiddenBull= input.bool(false,   title="Plot Hidden Bullish",                            group="Display Settings")
+plotBear =      input.bool(true,   title="Plot Bearish",                                    group="Display Settings")
+plotHiddenBear =input.bool(false,   title="Plot Hidden Bearish",                            group="Display Settings")
+
+plotKandD =     input.bool(true,   title="Plot K and D",                                    group="Display Settings")
+plotDots =      input.bool(true,   title="Use dots rather than line color",                 group="Display Settings")
+
+plotStochCross =input.bool(true,   title="Plot Stochasic Crosses",                          group="Display Settings")
+plotStochOBOS  =input.bool(true,   title="Plot Overbought/Oversold Reversals",              group="Display Settings")
+
+
+
+//Stochastic Calculations
+stch = ta.stoch(close, high, low, periodK)
+
+k = CommonFilters.jma(stch, smoothK, phaseK)
+k := useSlow ? CommonFilters.jma(k, smoothK, -50) : k
+
+d = 0.05 + 0.95* nz(k[1]) //Use a multiplier of 0.95 as per Ehler's Stochastic.
+
+
+k := k > 100 ? 100 : k < 0 ? 0 : k
+
+//Plots
+buy_os = k > d and k[1] < stochOversold and k > stochOversold
+sell_ob = k < d and k[1] > stochOverbought and k < stochOverbought 
+
+buy_cross = ta.crossover(k, d) and k > stochOversold and k < stochOverbought
+sell_cross = ta.crossunder(k, d) and k > stochOversold and k < stochOverbought
+
+col =  buy_os and plotStochOBOS ? color.green : sell_ob and plotStochOBOS ? color.red : buy_cross and plotStochCross ? color.fuchsia : sell_cross and plotStochCross ? color.aqua : plotKandD ? #2962FF : color.white
+
+dot = plotDots and ((buy_os and plotStochOBOS) or (sell_ob and plotStochOBOS) or (buy_cross and plotStochCross) or (sell_cross and plotStochCross))
+plotshape(dot ? k : na, style = shape.circle, location = location.absolute, color = col, size=size.tiny)
+k_plot = plot(k, title="%K", color = plotDots ? plotKandD ? #2962FF : color.white : col, linewidth = 2)
+d_plot = plot(plotKandD ? d :na, title="%D", color=#FF6D00, linewidth = 1)
+h0 = hline(80, "Upper Band", color=#787B86)
+hline(50, "Middle Band", color=color.new(#787B86, 50))
+h1 = hline(20, "Lower Band", color=#787B86)
+fill(h0, h1, color=color.rgb(33, 150, 243, 90), title="Background")
+
+
+    
+//Divergence Calculations
+bearColor = color.red
+bullColor = color.green
+hiddenBullColor = color.new(color.green, 80)
+hiddenBearColor = color.new(color.red, 80)
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+osc = k
+
+plFound = na(ta.pivotlow(osc, lbL, lbR)) ? false : true
+phFound = na(ta.pivothigh(osc, lbL, lbR)) ? false : true
+_inRange(cond) =>
+	bars = ta.barssince(cond == true)
+	rangeLower <= bars and bars <= rangeUpper
+
+//------------------------------------------------------------------------------
+// Regular Bullish
+// Osc: Higher Low
+
+oscHL = osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Lower Low
+
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+bullCond = plotBull and priceLL and oscHL and plFound
+
+plot(
+     plFound ? osc[lbR] : na,
+     offset=-lbR,
+     title="Regular Bullish",
+     linewidth=2,
+     color=(bullCond ? bullColor : noneColor)
+     )
+
+plotshape(
+	 bullCond and plotLabels ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bullish Label",
+	 text=" Bull ",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// Osc: Lower Low
+
+oscLL = osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Higher Low
+
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+hiddenBullCond = plotHiddenBull and priceHL and oscLL and plFound
+
+plot(
+	 plFound ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish",
+	 linewidth=2,
+	 color=(hiddenBullCond ? hiddenBullColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBullCond and plotLabels ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish Label",
+	 text=" H Bull ",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+// Regular Bearish
+// Osc: Lower High
+
+oscLH = osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Higher High
+
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+
+bearCond = plotBear and priceHH and oscLH and phFound
+
+plot(
+	 phFound ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish",
+	 linewidth=2,
+	 color=(bearCond ? bearColor : noneColor)
+	 )
+
+plotshape(
+	 bearCond and plotLabels ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish Label",
+	 text=" Bear ",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+// Hidden Bearish
+// Osc: Higher High
+
+oscHH = osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Lower High
+
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+
+hiddenBearCond = plotHiddenBear and priceLH and oscHH and phFound
+
+plot(
+	 phFound ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish",
+	 linewidth=2,
+	 color=(hiddenBearCond ? hiddenBearColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBearCond and plotLabels ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish Label",
+	 text=" H Bear ",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+	 
+//Alert Options
+
+alertcondition(hiddenBearCond, "Alert on Hidden Bearish Divergence", "Hidden Bearish Divergence")
+alertcondition(hiddenBullCond, "Alert on Hidden Bullish Divergence", "Hidden Bullish Divergence")
+alertcondition(bullCond,       "Alert on Bullish Divergence",        "Bullish Divergence")
+alertcondition(bearCond,       "Alert on Bearish Divergence",        "Bearish Divergence")
+alertcondition(buy_cross,      "Alert on Bullish Stochastic Cross",  "Bullish Stochastic Cross")
+alertcondition(sell_cross,     "Alert on Bearish Stochastic Cross",  "Bearish Stochastic Cross")
+alertcondition(buy_os,         "Alert on Bullish Oversold Reversal", "Bullish Reversal from Oversold Region")
+alertcondition(sell_ob,        "Alert on Bearish Overbought Reversal","Bearish Reversal from Overbought Region")

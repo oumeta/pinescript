@@ -1,0 +1,16 @@
+//@version=4
+study(title="ALMA RSI", shorttitle="ALMA-RSI", format=format.price, precision=2)
+
+src = input(close, "Source"),
+len = input(14, "Length", minval=1)
+offset = input(0.7, "ALMA Offset", step=0.05)
+sigma = input(6, "ALMA Sigma")
+
+up = alma(max(change(src), 0), len, offset, sigma)
+down = alma(-min(change(src), 0), len, offset, sigma)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+plot(rsi, color=color.lime)
+band1 = hline(75)
+band0 = hline(25)
+fill(band1, band0, color=color.lime, transp=90)

@@ -1,0 +1,62 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © loxx
+
+//@version=5
+indicator("Jurik Volty [Loxx]", overlay = false, shorttitle="JV [Loxx]", timeframe="", timeframe_gaps=true)
+
+greencolor = #2DD204  
+redcolor = #D2042D 
+
+price = input.source(close, "Source")
+length = input.int(15, "Length")
+colorbars = input.bool(false, "Color bars?")
+
+volty(src, len) =>
+    len1 = math.max(math.log(math.sqrt(0.5 * (len-1))) / math.log(2.0) + 2.0, 0)
+    pow1 = math.max(len1 - 2.0, 0.5)
+    volty = 7.0, avolty = 9.0, vsum = 8.0, bsmax = 5.0, bsmin = 6.0, avgLen = 65
+    
+    del1 = src - nz(bsmax[1])
+    del2 = src - nz(bsmin[1])
+    
+    div = 1.0 / (10.0 + 10.0 * (math.min(math.max(len-10, 0), 100)) / 100)
+    volty := math.abs(del1) > math.abs(del2) ? math.abs(del1) : math.abs(del2)
+    vsum := nz(vsum[1]) + div * (volty - nz(volty[10]))
+    
+    temp_avg = ta.sma(vsum, avgLen)
+    
+    y = bar_index + 1
+    if(y <= avgLen + 1)
+        avolty := nz(avolty[1]) + 2.0 * (vsum - nz(avolty[1])) / (avgLen + 1)	   
+    else
+        avolty := temp_avg
+        
+    dVolty = avolty > 0 ? volty / avolty : 0
+    dVolty := dVolty > math.pow(len1, 1.0/pow1) ? math.pow(len1, 1.0/pow1) : dVolty
+    dVolty := dVolty < 1 ? 1 : dVolty
+    pow2 = math.pow(dVolty, pow1)
+    len2 = math.sqrt(0.5 * (len - 1)) * len1
+    Kv = math.pow(len2 / (len2 + 1), math.sqrt(pow2))
+    bsmax := del1 > 0 ? src : src - Kv * del1
+    bsmin := del2 < 0 ? src : src - Kv * del2
+    [avolty, vsum]
+
+
+[avolty, vsum] = volty(price, length)
+
+plot(avolty, color = color.white, linewidth = 2)
+plot(vsum, color = vsum >= avolty ? greencolor : color.gray, linewidth = 3)
+
+barcolor(colorbars ? vsum >= avolty ? greencolor : color.gray : na)
+
+
+
+
+
+
+
+
+
+
+
+

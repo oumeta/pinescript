@@ -1,0 +1,546 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © wallneradam
+
+//@version=5
+
+// @description Indicator functions can be used in other indicators and strategies. This will be extended by time with indicators I use in my strategies and studies. All indicators are highly configurable with good defaults.
+library("TAExt", overlay=true)
+
+
+///////////////
+// Constants //
+///////////////
+
+PI = 3.1415926535
+TORAD = 180 / PI
+
+
+///////////////
+// Functions //
+///////////////
+
+// @function Jurik Moving Average
+// @param src       The source of the moving average
+// @param length    The length of the moving average calculation
+// @param phase     The phase of jurik MA calculation (-100..100)
+// @param power     The power of jurik MA calculation
+// @returns         The Jurik MA series
+export jma(series float src = close, simple int length = 7, simple int phase = 50, simple float power = 2) =>
+    phase_ratio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+
+    beta = 0.45 * (length - 1) / (0.45 * (length - 1) + 2)
+    alpha = math.pow(beta, power)
+    
+    jma = 0.0
+    
+    e0 = 0.0
+    e0 := (1 - alpha) * src + alpha * nz(e0[1])
+    
+    e1 = 0.0
+    e1 := (src - e0) * (1 - beta) + beta * nz(e1[1])
+    
+    e2 = 0.0
+    e2 := (e0 + phase_ratio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    
+    jma := e2 + nz(jma[1])
+    jma
+    
+
+// @function Builtin Moving Average by type, used by other functions
+// @param src       The source of the moving average
+// @param length    The length of the moving average calculation
+// @param type      The type of the moving average
+// @param offset    Used only by ALMA, it is the ALMA offset
+// @param sigma     Used only by ALMA, it is the ALMA sigma
+// @param phase     The phase of jurik MA calculation (-100..100)
+// @param power     The power of jurik MA calculation
+// @returns         The moving average series
+_anyma_builtin(series float src, simple int length, simple string type = "EMA", 
+                 simple float offset = 0.85, simple int sigma = 6,
+                 simple int phase = 50, simple float power = 2) =>
+    switch type
+        "SMA" => ta.sma(src, length)
+        "EMA" => ta.ema(src, length)
+        "WMA" => ta.wma(src, length)
+        "VWMA" => ta.vwma(src, length)
+        "RMA" => ta.rma(src, length)
+        "DEMA" => 
+            ema1 = ta.ema(src, length)
+            ema2 = ta.ema(ema1, length)
+            2 * ema1 - ema2
+        "TEMA" => 
+            ema1 = ta.ema(src, length)
+            ema2 = ta.ema(ema1, length)
+            ema3 = ta.ema(ema2, length)
+            3 * (ema1 - ema2) + ema3
+        "ZLEMA" => ta.ema(src + (src - src[math.round(length / 2)]), length)
+        "HMA" => ta.hma(src, length)
+        "ALMA" => ta.alma(src, length, offset, sigma)
+        "LSMA" => ta.linreg(src, length, 0)
+        "SWMA" => ta.swma(src)
+        "SMMA" => 
+            float smma = 0.0
+            smma := na(smma[1]) ? src : (smma[1] * (length - 1) + src) / length
+        "DONCHIAN" => math.avg(ta.lowest(src, length), ta.highest(src, length))
+        "JMA" => jma(src, length, phase=phase, power=power)
+        => na
+
+
+// @function ATR without outliers
+// @param length        The length of the TR smoothing
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @param ma_type       The moving average type used for smoothing
+// @returns             The ATR value
+export atrwo(simple int length = 14, simple int stdev_length = 100, simple float stdev_mult = 1.0, simple string ma_type = "RMA") =>
+    float atrwo = 0.0
+    float trwo = 0.0
+    max_tr = (na(atrwo[1]) ? ta.tr : atrwo[1]) + stdev_mult * ta.stdev(ta.tr, stdev_length)
+    trwo := ta.tr > max_tr ? trwo[1] : ta.tr
+    atrwo := _anyma_builtin(trwo, length, ma_type)
+    atrwo
+    
+
+// @function ATR without outlier weighted moving average 
+// @param src           The source of the moving average
+// @param length        The length of the moving average
+// @param type          The type of the moving average, possible values: SMA, EMA, RMA
+// @param atr_length    The length of the ATR
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @returns             The moving average series
+export atrwma(series float src = close, simple int length = 50, simple string type = "SMA",
+                 simple int atr_length = 14, simple int stdev_length = 100, simple float stdev_mult = 1.0) =>
+    atrwo = atrwo(length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult)
+
+    switch type 
+        "SMA" => ta.sma(src * atrwo, length) / ta.sma(atrwo, length)
+        "EMA" => ta.ema(src * atrwo, length) / ta.ema(atrwo, length)
+        "RMA" => ta.rma(src * atrwo, length) / ta.rma(atrwo, length)
+        "WMA" => ta.wma(src * atrwo, length) / ta.wma(atrwo, length)
+    
+
+// @function Moving Average by type
+// @param src       The source of the moving average
+// @param length    The length of the moving average calculation
+// @param type      The type of the moving average
+// @param offset    Used only by ALMA, it is the ALMA offset
+// @param sigma     Used only by ALMA, it is the ALMA sigma
+// @param phase     The phase of jurik MA calculation (-100..100)
+// @param power     The power of jurik MA calculation
+// @returns         The moving average series
+export anyma(series float src, simple int length, simple string type = "EMA", 
+             simple float offset = 0.85, simple int sigma = 6,
+             simple int atr_length = 14, simple int stdev_length = 100, simple float stdev_mult = 1.0,
+             simple int phase = 50, simple float power = 2) =>
+    switch type
+        "ATRWSMA" => atrwma(src, length, type="SMA", atr_length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult)
+        "ATRWEMA" => atrwma(src, length, type="EMA", atr_length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult)
+        "ATRWRMA" => atrwma(src, length, type="RMA", atr_length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult)
+        "ATRWWMA" => atrwma(src, length, type="WMA", atr_length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult)
+        "JMA" => jma(src, length, phase=phase, power=power)
+        => _anyma_builtin(src=src, length=length, type=type, offset=offset, sigma=sigma, phase=phase, power=power)
+
+
+// @function Slope per ATR, it is a slope, that can be used across multiple assets
+// @param src           The Source of slope
+// @param lookback      How many timestaps to look back
+// @param atr_length    The length of the TR smoothing
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @param atr_ma_type   The moving average type used for smoothing
+// @returns             The slope value
+export slope_per_atr(series float src, simple int lookback,
+                     simple int atr_length = 14, simple int stdev_length = 100, simple float stdev_mult = 0.5, simple string atr_ma_type = "RMA") =>
+    atr = atrwo(length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult, ma_type=atr_ma_type)
+    ta.change(src, lookback) / lookback / atr
+    
+
+// @function Angle of Slope per ATR
+// @param src           The Source of slope
+// @param lookback      How many timestaps to look back
+// @param atr_length    The length of the TR smoothing
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @param atr_ma_type   The moving average type used for smoothing
+// @returns             The slope value
+export angle(series float src, simple int lookback,
+             simple int atr_length = 14, simple int stdev_length = 100, simple float stdev_mult = 0.5, simple string atr_ma_type = "RMA") =>
+    slope = slope_per_atr(src=src, lookback=lookback, atr_length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult, atr_ma_type=atr_ma_type)
+    math.atan(slope) * TORAD
+    
+    
+// @function Moving Average Convergence Divergence (MACD)
+// @param fast_src          The source series used by MACD fast
+// @param slow_src          The source series used by MACD slow
+// @param fast_ma_type      The MA type for the MACD
+// @param slow_ma_type      The MA type for the MACD
+// @param fast_length       The fast MA length of the MACD
+// @param slow_length       The slow MA length of the MACD
+// @param signal_ma_type    The MA type for the MACD signal
+// @param signal_length     The signal MA length of the MACD
+export macd(series float fast_src = close, series float slow_src = close,
+             simple string fast_ma_type = "EMA", simple string slow_ma_type = "EMA", 
+             simple int fast_length = 12, simple int slow_length = 26,
+             simple string signal_ma_type = "EMA", simple int signal_length = 9) =>
+             
+    fast_ma = anyma(fast_src, fast_length, fast_ma_type)
+    slow_ma = anyma(slow_src, slow_length, slow_ma_type)
+    
+    macd = fast_ma - slow_ma
+    signal = anyma(macd, signal_length, signal_ma_type)
+    hist = macd - signal
+    
+    [macd, signal, hist]
+    
+
+// @function Waddah Attar Explosion (WAE)
+// @param macd_src          The source series used by MACD
+// @param macd_ma_type      The MA type for the MACD
+// @param macd_fast_length  The fast MA length of the MACD
+// @param macd_slow_length  The slow MA length of the MACD
+// @param macd_sensitivity  The MACD diff multiplier
+// @param bb_base_src       The source used by stdev
+// @param bb_upper_src      The source used by the upper Bollinger Band
+// @param bb_lower_src      The source used by the lower Bollinger Band
+// @param bb_ma_type        The MA type of the Bollinger Bands
+// @param bb_length         The lenth for Bollinger Bands
+// @param bb_mult           The multiplier for Bollinger Bands
+// @param dead_zone_length  The ATR length for dead zone calculation
+// @param dead_zone_mult    The ATR multiplier for dead zone
+// @returns                 [float up, float down, float explosion, float dead_zone]
+export wae(series float macd_src = close, simple string macd_ma_type = "EMA", simple int macd_fast_length = 20, simple int macd_slow_length = 40, simple float macd_sensitivity = 100.0,
+             series float bb_base_src = close, series float bb_upper_src = high, series float bb_lower_src = low, 
+             simple string bb_ma_type = "SMA", simple int bb_length = 20, simple float bb_mult = 2.0, 
+             simple int dead_zone_length = 100, simple float dead_zone_mult = 3.7) =>
+	
+	macd_fast_ma = anyma(macd_src, macd_fast_length, macd_ma_type)
+    macd_slow_ma = anyma(macd_src, macd_slow_length, macd_ma_type)
+    
+    macd_diff = ((macd_fast_ma - macd_slow_ma) - (macd_fast_ma[1] - macd_slow_ma[1])) * macd_sensitivity
+    
+    bb_dev = ta.stdev(bb_base_src, bb_length) * bb_mult
+    bb_upper = anyma(bb_upper_src, bb_length, bb_ma_type) + bb_dev
+    bb_lower = anyma(bb_lower_src, bb_length, bb_ma_type) - bb_dev
+    
+    explosion = bb_upper - bb_lower
+    
+    float up = (macd_diff >= 0) ? macd_diff : na
+    float down = (macd_diff < 0) ? (-1 * macd_diff) : na
+    
+    dead_zone = nz(ta.rma(ta.tr(true), dead_zone_length)) * dead_zone_mult
+    
+    [up, down, explosion, dead_zone]
+    
+
+// @function Semaphore Signal Level channel (SSL)
+// @param length        The length of the moving average
+// @param src           Source of compare
+// @param high_src      Source of the high moving average 
+// @param low_src       Source of the low moving average 
+// @returns             [ssl_up, ssl_down]
+export ssl(simple int length = 10, simple string ma_type = "SMA", 
+             series float src = close, series float high_src = high, series float low_src = low) =>
+    ma_high = anyma(high_src, length, ma_type)
+    ma_low = anyma(low_src, length, ma_type)
+    float hlv = na
+    hlv := src > ma_high ? 1 : src < ma_low ? -1 : hlv[1]
+    ssl_down = hlv < 0 ? ma_high: ma_low
+    ssl_up = hlv < 0 ? ma_low : ma_high
+    [ssl_up, ssl_down]
+
+
+// @function Average Directional Index + Direction Movement Index (ADX + DMI)
+// @param atr_length        The length of ATR
+// @param di_length         DI plus and minus smoothing length
+// @param adx_length        ADX smoothing length
+// @param high_src          Source of the high moving average 
+// @param low_src           Source of the low moving average 
+// @param atr_ma_type       MA type of the ATR calculation
+// @param di_ma_type        MA type of the DI calculation
+// @param adx_ma_type       MA type of the ADX calculation
+// @param atr_stdev_length  The length of the standard deviation, used for detecting outliers
+// @param atr_stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @returns             [plus, minus, adx]
+export adx(simple int atr_length = 14, simple int di_length = 14, simple int adx_length = 14,
+             series float high_src = high, series float low_src = low,
+             simple string atr_ma_type = "RMA", simple string di_ma_type = "RMA", simple string adx_ma_type="RMA",
+             simple int atr_stdev_length=100, simple float atr_stdev_mult=1.0) =>
+    up = ta.change(high_src)
+    down = -ta.change(low_src)
+    plus_dm = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minus_dm = na(down) ? na : (down > up and down > 0 ? down : 0)
+    atr = atrwo(length=atr_length, stdev_length=atr_stdev_length, stdev_mult=atr_stdev_mult, ma_type=atr_ma_type)
+    plus = fixnan(100 * anyma(plus_dm, di_length, di_ma_type) / atr)
+    minus = fixnan(100 * anyma(minus_dm, di_length, di_ma_type) / atr)
+    sum = plus + minus
+    adx = 100 * anyma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adx_length, adx_ma_type)
+    [plus, minus, adx]
+
+
+// @function Choppiness Index (CHOP) using ATRWO
+// @param length        The sum and highest/lowest length
+// @param atr_length    The length of the ATR
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @param ma_type       The MA type of ATR
+// @returns             The choppiness value
+export chop(simple int length = 12, simple int atr_length = 3, simple int stdev_length = 100, simple float stdev_mult = 1.0, simple string ma_type = "RMA") =>
+    atr = atrwo(length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult, ma_type=ma_type)
+    100 * math.log10(math.sum(atr, length) / (ta.highest(length) - ta.lowest(length))) / math.log10(length)
+    
+    
+// @function Choppiness Index (CHOP) using stdev instead of ATR
+// @param length        The sum and highest/lowest length
+// @param src           The source of the stdev
+// @param stdev_length  The length of the stdev calculation
+// @returns             The choppiness value
+export chop_stdev(simple int length = 12, series float src = close, simple int stdev_length = 12) =>
+    stdev = ta.stdev(src, stdev_length)
+    100 * math.log10(math.sum(stdev, length) / (ta.highest(length) - ta.lowest(length))) / math.log10(length)
+    
+
+// @function Keltner Channels (KC)
+// @param length        The length of moving averages
+// @param atr_length    The ATR length, the ATR is used to shift the upper and lower bands
+// @param mult          The ATR multiplier 
+// @param base_src      Source of the base line
+// @param upper_src     Source of the upper line
+// @param lower_src     Source of the lower line
+// @param base_ma_type  The MA type of the base line
+// @param upper_ma_type The MA type of the upper line
+// @param lower_ma_type The MA type of the lower line
+// @param stdev_length  The length of the standard deviation, used for detecting outliers
+// @param stdev_mult    The multiplier of the standard deviation, used for detecting outliers
+// @retrurns            [base, lower, upper]
+export kc(simple int length = 20, simple int atr_length = 14, simple float mult=2.0,
+             series float base_src = close, series float upper_src = close, series float lower_src = close,
+             simple string base_ma_type = "SMA", simple string upper_ma_type = "SMA", simple string lower_ma_type = "SMA",
+             simple int stdev_length = 100, simple float stdev_mult = 1.0, simple string atr_ma_type = "RMA") =>
+    
+    atr = atrwo(length=atr_length, stdev_length=stdev_length, stdev_mult=stdev_mult, ma_type=atr_ma_type) * mult
+    
+    // KC
+    base= anyma(base_src, length, base_ma_type)
+    upper = anyma(upper_src, length, upper_ma_type) + atr
+    lower = anyma(lower_src, length, lower_ma_type) - atr
+    
+    [base, lower, upper]
+    
+
+// @function            Keltner Channel Trend
+// @param base          The base value returned by kc function
+// @param upper         The upper value returned by kc function
+// @param lower         The lower value returned by kc function
+// @param lookback      Howmany timestaps to look back to determine the trend
+// @returns             [uptrend, downtrend, base_uptrend, lower_uptrend, upper_uptrend]
+export kc_trend(series float base, series float lower, series float upper, simple int lookback = 1) =>
+    // Trends
+    upper_uptrend = upper > upper[lookback]
+    base_uptrend = base > base[lookback]
+    lower_uptrend = lower > lower[lookback]
+    uptrend = upper_uptrend and base_uptrend and lower_uptrend
+    downtrend = not upper_uptrend and not base_uptrend and not lower_uptrend
+    [uptrend, downtrend, base_uptrend, lower_uptrend, upper_uptrend]
+    
+
+// @function Supertrend, calculated from above "kc" (Keltner Channel Function)
+// @param upper         The upper value returned by kc function
+// @param lower         The lower value returned by kc function
+// @param compare_src   Source of the base line
+// @param returns       [supertrend, direction]
+export supertrend(series float lower, series float upper, series float compare_src = close) =>
+    float _upper = na
+    float _lower = na
+    
+    prev_upper = _upper[1]
+    prev_lower = _lower[1]
+    
+    _lower := lower > prev_lower or compare_src[1] < prev_lower or na(prev_lower) ? lower : prev_lower
+    _upper := upper < prev_upper or compare_src[1] > prev_upper or na(prev_upper) ? upper : prev_upper
+    
+    int direction = na
+	float supertrend = na
+	
+	prev_supertrend = supertrend[1]
+	if prev_supertrend == prev_upper
+		direction := compare_src > _upper ? -1 : 1
+	else
+		direction := compare_src < _lower ? 1 : -1
+	supertrend := direction == -1 ? _lower : _upper
+	
+	[supertrend, direction]
+    
+    
+// @function                    Heiken Ashi (Smoothed) Candle
+// @param smooth_length         Smooth length before heiken ashi calculation
+// @param smooth_ma_type        Type of smoothing MA before heiken ashi calculation
+// @param after_smooth_length   Smooth length after
+// @param after_smooth_ma_type  Smooth MA type after
+// @param src_open              Sourve of open
+// @param src_high              Source of high
+// @param src_low               Source of low
+// @param src_close             Source of close
+// @returns                     [open, high, low, close]
+export heiken_ashi(simple int smooth_length=1, simple string smooth_ma_type = "EMA",
+             simple int after_smooth_length=1, simple string after_smooth_ma_type = "EMA",
+             series float src_open = open, series float src_high = high, series float src_low = low, series float src_close = close) =>
+    
+    float haopen = na
+    
+    o = anyma(src_open, smooth_length, smooth_ma_type)
+    h = anyma(src_high, smooth_length, smooth_ma_type)
+    l = anyma(src_low, smooth_length, smooth_ma_type)
+    c = anyma(src_close, smooth_length, smooth_ma_type)
+
+    haclose = (o + h + l + c) / 4.0
+    haopen := na(haopen[1]) ? (o + c) / 2 : (haopen[1] + haclose[1]) / 2
+    hahigh = math.max (h, math.max(haopen, haclose))
+    halow = math.min (l, math.min(haopen, haclose))
+    
+    o := anyma(haopen, after_smooth_length, after_smooth_ma_type)
+    h := anyma(hahigh, after_smooth_length, after_smooth_ma_type)
+    l := anyma(halow, after_smooth_length, after_smooth_ma_type)
+    c := anyma(haclose, after_smooth_length, after_smooth_ma_type)
+    
+    [o, h, l, c]
+             
+    
+
+/////////////
+// Testing //
+/////////////
+
+//
+// MA Selector
+//
+
+ma_type = input.string("EMA", "MA Type", options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="MA")
+ma_src = input.source(close, "MA Source", group="MA")
+ma_length = input.int(50, "MA Length", group="MA")
+
+plot(anyma(ma_src, ma_length, ma_type), "Any MA", color=color.white, linewidth=3)
+
+//
+// SSL
+//
+
+// ssl_length = input.int(20, "SSL Length", group="SSL")
+// ssl_src = input.source(hl2, "Source", group="SSL")
+// ssl_high_src = input.source(high, "Source of High", group="SSL")
+// ssl_low_src = input.source(low, "Source of Low", group="SSL")
+// ssl_ma_type = input.string("SMA", "MA Type", options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="SSL")
+
+// [ssl_up, ssl_down] = 
+//      ssl(length=ssl_length, src=ssl_src, high_src=ssl_high_src, low_src=ssl_low_src, ma_type=ssl_ma_type)
+
+// pup = plot(ssl_up, "SSL Up", linewidth=2, color=color.new(color.lime, 50))
+// pdown = plot(ssl_down, "SSL Down", linewidth=2, color=color.new(color.red, 50))
+// fill(pup, pdown, ssl_up >= ssl_down ? color.new(color.green, 90) : color.new(color.red, 90))
+
+//
+// Keltner Channels
+//
+
+kc_length = input.int(20, "KC Length", minval=1, group="KC")
+kc_atr_length = input.int(20, 'ATR Length', minval=1, group="KC")
+kc_mult = input.float(1.0, 'KC Mult', step=0.1, group="KC")
+kc_base_src = input(close, title='Base Source', group="KC")
+kc_upper_src = input(close, title='Upper Source', group="KC")
+kc_lower_src = input(close, title='Lower Source', group="KC")
+kc_base_ma_type = input.string('SMA', 'Base MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="KC")
+kc_upper_ma_type = input.string('SMA', 'Upper MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="KC")
+kc_lower_ma_type = input.string('SMA', 'Lower MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN"], group="KC")
+kc_stdev_length = input.int(200, 'TR StDev Length', minval=1, group="KC")
+kc_stdev_mult = input.float(1.0, 'TR StDev Multiplier', minval=0.01, step=0.1, group="KC")
+kc_atr_ma_type = input.string('RMA', 'ATR MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="KC")
+kc_trend_lookback = input.int(1, "Trend Lookback", minval=1, group="KC")
+
+[kc_base, kc_lower, kc_upper] = kc(length=kc_length, atr_length=kc_atr_length, mult=kc_mult,
+                                 base_src=kc_base_src, upper_src=kc_upper_src, lower_src=kc_lower_src,
+                                 base_ma_type=kc_base_ma_type, upper_ma_type=kc_upper_ma_type, lower_ma_type=kc_lower_ma_type,
+                                 stdev_length=kc_stdev_length, stdev_mult=kc_stdev_mult, atr_ma_type=kc_atr_ma_type)
+                            
+[kc_uptrend, kc_downtrend, kc_base_uptrend, kc_lower_uptrend, kc_upper_uptrend] = kc_trend(base=kc_base, lower=kc_lower, upper=kc_upper, lookback=kc_trend_lookback)
+
+// Dynamic colors
+kc_color_upper = kc_upper_uptrend ? color.new(color.green, 50) : color.new(color.red, 50)
+kc_color_base = kc_base_uptrend ? color.new(color.green, 50) : color.new(color.red, 50)
+kc_color_lower = kc_lower_uptrend ? color.new(color.green, 50) : color.new(color.red, 50)
+kc_color_bg = kc_uptrend ? color.new(color.green, 90) : kc_downtrend ? color.new(color.red, 90) : color.new(color.gray, 90)
+
+// Plotting
+kc_up_plot = plot(kc_upper, color=kc_color_upper, title='KC Upper')
+plot(kc_base, color=kc_color_base, title='KC Base')
+kc_low_plot = plot(kc_lower, color=kc_color_lower, title='KC Lower')
+fill(kc_up_plot, kc_low_plot, color=kc_color_bg, title='KC Background')
+
+//
+// Smoothed Heiken Ashi
+//
+
+ha_smooth_length = input.int(10, "Before Smooth Length", minval=1, group="Heiken Ashi")
+ha_after_smooth_length = input.int(10, "After Smooth Length", minval=1, group="Heiken Ashi")
+ha_smooth_ma_type = input.string('EMA', 'Before MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="Heiken Ashi")
+ha_after_smooth_ma_type = input.string('EMA', 'After MA Type', options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "LSMA", "SWMA", "SMMA", "JMA", "DONCHIAN", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="Heiken Ashi")
+
+[o, h, l, c] = heiken_ashi(smooth_length=ha_smooth_length, smooth_ma_type=ha_smooth_ma_type, after_smooth_length=ha_after_smooth_length, after_smooth_ma_type=ha_after_smooth_ma_type)
+plotcandle(o, h, l, c, title="Smoothed Heiken Ashi", color=o > c ? color.red : color.lime)
+
+
+//
+// Supertrend
+//
+
+[supertrend, supertrend_direction] = supertrend(lower=kc_lower, upper=kc_upper)
+
+plot(supertrend_direction < 0 ? supertrend : na, "Supertrend Up direction", color=color.green, style=plot.style_linebr)
+plot(supertrend_direction < 0 ? na : supertrend, "Supertrend Down direction", color=color.red, style=plot.style_linebr)
+    
+
+//
+// WAE + MA selector
+//
+
+// wae_macd_src = input.source(close, "WAE MACD Source", group="WAE")
+// wae_macd_ma_type = input.string("EMA", "MACD MA Type", options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "JMA", "LSMA", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="WAE")
+// wae_macd_fast_length = input.int(20, "FastEMA Length", minval=1, group="WAE")
+// wae_macd_slow_length = input.int(40, "SlowEMA Length", minval=1, group="WAE")
+// wae_macd_sensitivity = input.int(100, "Sensitivity", minval=1, group="WAE")
+// wae_bb_base_src = input.source(close, "WAE BB Base Source", group="WAE")
+// wae_bb_upper_src = input.source(high, "WAE BB Base Source", group="WAE")
+// wae_bb_lower_src = input.source(low, "WAE BB Base Source", group="WAE")
+// wae_bb_ma_type = input.string("SMA", "BB MA Type", options=['SMA', 'EMA', 'WMA', "VWMA", "RMA", "DEMA", "TEMA", "ZLEMA", "HMA", "ALMA", "JMA", "LSMA", "ATRWSMA", "ATRWEMA", "ATRWRMA", "ATRWWMA"], group="WAE")
+// wae_bb_length = input.int(20, "BB Channel Length", minval=1, group="WAE")
+// wae_bb_mult = input.float(2.0, "BB Stdev Multiplier", step=0.1, minval=0.1, group="WAE")
+
+// [wae_up, wae_down, wae_explosion, wae_dead_zone] = wae(
+//      macd_src=wae_macd_src, macd_ma_type=wae_macd_ma_type, macd_fast_length=wae_macd_fast_length, macd_slow_length=wae_macd_slow_length, macd_sensitivity=wae_macd_sensitivity,
+//      bb_base_src=wae_bb_base_src, bb_upper_src=wae_bb_upper_src, bb_lower_src=wae_bb_lower_src, bb_ma_type=wae_bb_ma_type, bb_length=wae_bb_length, bb_mult=wae_bb_mult)
+     
+// plot(wae_up, "WAE Up Trend", style=plot.style_columns, linewidth=1, color=(wae_up < wae_up[1]) ? color.green : color.lime, transp=45)
+// plot(wae_down, "WAE Down Trend", style=plot.style_columns, linewidth=1, color=(wae_down < wae_down[1]) ? color.maroon : color.red, transp=45)
+// plot(wae_explosion, "WAE Explosion Line", style=plot.style_line, linewidth=2, color=color.orange)
+// plot(wae_dead_zone, "WAE Dead Zone", color=color.blue, linewidth=1, style=plot.style_cross)
+
+//
+// Chop
+//
+
+// chop_length = input.int(12, "Chop Length", minval=1, group="Chop")
+// chop_atr_length = input.int(3, "ATR Length", minval=1, group="Chop")
+// chop_atrwo_stdev_length = input.int(100, "ATRWO STDev Length", minval=1, group="Chop")
+// chop_atrwo_stdev_mult = input.float(1.0, "ATRWO STDev Multiplier", minval=0.0, step=0.1, group="Chop")
+// chop_stdev_src = input.source(hl2, "STDev Source", group="Chop")
+// chop_stdev_length = input.int(12, "STDev Length", minval=1, group="Chop")
+
+// chop_atr = chop(length=chop_length, atr_length=chop_atr_length, stdev_length=chop_atrwo_stdev_length, stdev_mult=chop_atrwo_stdev_mult)
+// chop_stdev = chop_stdev(length=chop_length, src=chop_stdev_src, stdev_length=chop_stdev_length)
+
+// plot(chop_atr, "CHOP ATR", color=color.teal)
+// plot(chop_stdev, "CHOP STD", color=color.blue)
+// band1 = hline(61.8, "Upper Band", color=#C0C0C0, linestyle=hline.style_dashed)
+// band0 = hline(38.2, "Lower Band", color=#C0C0C0, linestyle=hline.style_dashed)
+// fill(band1, band0, color=#996B1920, title="Background")
+
+// hline(50, "Center", color=color.gray, linestyle=hline.style_dashed)

@@ -1,0 +1,560 @@
+// @version=5
+// @author=NelsonM1984
+// Thanks to Chris Moody for the option heavy MACD setup, and everget for the original Jurik code.
+// Thanks also to Giorgos Siligardos, whose article 'Leader Of The MACD' I read, it appears in: 
+// Stocks & Commodities V. 26:7 (pp.24-33).
+// Please make sure to read it to get a detailed understanding of how to use the Leader.
+// 
+// Basically (quoted from article):
+// "There are two essential and timely signs the Leader can offer
+// with respect to MACD: simple divergences and crossovers.
+// ■ Simple divergences
+// Shortly after a simple divergence between the Leader and MACD occurs, MACD often turns and takes the
+// direction of its Leader.
+// ■ Crossovers [marked with yellow dots in this script]
+// A crossover occurs when the Leader crosses the line of MACD. Shortly after the crossing, MACD usually
+// follows the Leader. Often, crossovers follow simple divergences at extremes." p.28
+//
+// 
+// Other than the norm (12, 26, 9), some suggested numbers are:
+// setup 1: Fast length: 12     Slow length: 26     Signal length: 9    All phases and powers: 50 and 2 respectively
+// setup 2: Fast length: 8      Slow length: 21     Signal length: 4    Power:1
+// setup 3: Fast length: 7      PowerFast: 2        PhaseFast: -100;    Slow length: 40      PowerSlow: 1         PhaseSlow: 0;          Signal length: 9
+// setup 4: Fast length: 3      Slow length: 10     Signal length: 9;   All phases and powers: 50 and 2 respectively
+// Setup 3 is the default of this indicator.
+// Version  Date    Change
+// 1.1 - 09.11.21 - Started and made Jurik MACD
+// 1.2 - 10.11.21 - Added in Leader
+// 1.3 - 11.11.21 - Added in Divergence
+// 1.4 - 11.11.21 - Fixed some issues, changed colours to first colour scheme
+
+indicator('Jurik MacD & Leader NCM', shorttitle='JMacD & Leader 1.4 NCM', overlay=false)
+
+//-----------------////Display////-----------------//{
+useCurrentRes =     input(true, title='Use current chart resolution?')
+resCustom =         input.timeframe(title='Use different timeframe? Uncheck box above', defval='60')
+plotDiv =           input(false, title="Plot Divergence")
+smd =               input(true, title='Show MacD & Signal Line? (Also Turn Off Dots Below)', group='MacD settings')
+MacDLeader =        input(true, title='Show MacD Leader?', group='MacD settings')
+sd =                input(true, title='Show dots when MacD crosses Signal Line?', group='MacD settings')
+sl =                input(true, title='Show dots when Leader crosses MacD?', group='MacD settings')
+sh =                input(true, title='Show Histogram?', group='MacD settings')
+macd_colorChange =  input(false, title='Highlight MacD-Signal Line crosses with colors?', group='MacD settings')
+hist_colorChange =  input(true, title='Four MacD Histogram Colors?', group='MacD settings')
+
+res = useCurrentRes ? timeframe.period : resCustom
+src = input(title='Source', defval=close)
+
+//}
+
+//-----------------////Jurik settings/calculation////-----------------//{
+//Jurik Slow MA length
+slowLength = input(title='Slow Length', defval=40, group='Slow Jurik')
+
+//Jurik phase and power (impacts Slow Jurik input)
+phase = input(title='Slow Phase', defval=0, group='Slow Jurik')
+power = input(title='Slow Power', defval=1, group='Slow Jurik')
+
+//Jurik calculation for Slow length
+calc_jma(src, slowLength,  phase,  power) =>
+    phaseRatio =  phase < -100 ? 0.5 :  phase > 100 ? 2.5 :  phase / 100 + 1.5
+
+    beta = 0.45 * ( slowLength - 1) / (0.45 * ( slowLength - 1) + 2)
+    alpha = math.pow(beta,  power)
+    e0 = 0.0
+    e0 := (1 - alpha) *  src + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := ( src - e0) * (1 - beta) + beta * nz(e1[1])
+    jma = 0.0
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    jma := e2 + nz(jma[1])
+
+//Slow Jurik MA    
+slowJMA = calc_jma(src, slowLength, phase, power)
+
+//Jurik Fast MA length
+fastLength = input(title='Fast Length', defval=7, group='Fast Jurik')
+
+//Jurik phase and power (impacts Fast input)
+phaseF = input(title='Fast Phase', defval=-100, group='Fast Jurik')
+powerF = input(title='Fast Power', defval=2, group='Fast Jurik')
+
+//Jurik calculation for Fast
+calc_jmaF(src, fastLength,  phaseF,  powerF) =>
+    phaseRatioF =  phaseF < -100 ? 0.5 :  phaseF > 100 ? 2.5 :  phaseF / 100 + 1.5
+
+    betaF = 0.45 * ( fastLength - 1) / (0.45 * ( fastLength - 1) + 2)
+    alphaF = math.pow(betaF,  powerF)
+    e0F = 0.0
+    e0F := (1 - alphaF) *  src + alphaF * nz(e0F[1])
+    e1F = 0.0
+    e1F := ( src - e0F) * (1 - betaF) + betaF * nz(e1F[1])
+    jmaF = 0.0
+    e2F = 0.0
+    e2F := (e0F + phaseRatioF * e1F - nz(jmaF[1])) * math.pow(1 - alphaF, 2) + math.pow(alphaF, 2) * nz(e2F[1])
+    jmaF := e2F + nz(jmaF[1])
+
+
+//Fast Jurik MA
+fastJMA = calc_jmaF(src, fastLength, phaseF, powerF)
+
+//MacD calc
+jmacd = fastJMA - slowJMA
+
+//Jurik calculation for Signal length
+signalLength = input.int(title='Signal Length', defval=9, minval=1, group='Signal Jurik')
+
+//Jurik phase and power (impacts Signal input)
+phaseS = input(title='Signal Phase', defval=50, group='Signal Jurik')
+powerS = input(title='Signal Power', defval=2, group='Signal Jurik')
+
+calc_jmaSig(src, signalLength,  phaseS,  powerS) =>
+    phaseRatioS =  phaseS < -100 ? 0.5 :  phaseS > 100 ? 2.5 :  phaseS / 100 + 1.5
+
+    betaS = 0.45 * ( signalLength - 1) / (0.45 * ( signalLength - 1) + 2)
+    alphaS = math.pow(betaS,  powerS)
+    e0S = 0.0
+    e0S := (1 - alphaS) *  src + alphaS * nz(e0S[1])
+    e1S = 0.0
+    e1S := ( src - e0S) * (1 - betaS) + betaS * nz(e1S[1])
+    jmaS = 0.0
+    e2S = 0.0
+    e2S := (e0S + phaseRatioS * e1S - nz(jmaS[1])) * math.pow(1 - alphaS, 2) + math.pow(alphaS, 2) * nz(e2S[1])
+    jmaS := e2S + nz(jmaS[1])
+
+//Signal calc
+signal = calc_jmaSig(jmacd, signalLength, phaseS, powerS)
+
+hist = jmacd - signal
+
+indicator1 = fastJMA + calc_jma((close-fastJMA), fastLength, phase, power)
+indicator2 = slowJMA + calc_jma((close-slowJMA), slowLength, phase, power)
+
+jmacdLeader = indicator1 - indicator2
+
+outMacD = request.security(syminfo.tickerid, res, jmacd)
+outSignal = request.security(syminfo.tickerid, res, signal)
+outHist = request.security(syminfo.tickerid, res, hist)
+outLeader = request.security(syminfo.tickerid, res, jmacdLeader)
+
+histA_IsUp = outHist > outHist[1] and outHist > 0
+histA_IsDown = outHist < outHist[1] and outHist > 0
+histB_IsDown = outHist < outHist[1] and outHist <= 0
+histB_IsUp = outHist > outHist[1] and outHist <= 0
+
+//MacD Color Definitions
+jmaColor = color.new(#d1bce3, 100)
+jmaColor2 = color.new(#048ba8, 100)
+macd_IsAbove = outMacD > outSignal
+macd_IsBelow = outMacD < outSignal
+leader_IsAbove = outLeader > outMacD
+
+plot_color = hist_colorChange ? histA_IsUp ? color.new(#048ba8,0) : histA_IsDown ? color.new(#2c699a, 40) : histB_IsDown ? color.new(#ce93d8, 30) : histB_IsUp ? color.new(#54478c, 0) : color.new(#16db93, 50) : color.new(#54478c, 50)
+macd_color = macd_colorChange ? macd_IsAbove ? color.new(#689fe6, 0) : color.new(#689fe6, 50) : color.new(#689fe6, 0)
+signal_color = macd_colorChange ? macd_IsAbove ? color.new(#FF9F1C, 0) : color.new(#FF9F1C, 50) : color.new(#FF9F1C, 0)
+leader_color = macd_colorChange ? leader_IsAbove ? color.new(#16db93, 0) : color.new(#16db93, 50) : color.new(#16db93, 0)
+circ_color = macd_IsAbove ? color.new(#39ff14, 0) : color.new(#d9381e, 0)
+circ_colorL = leader_IsAbove ? color.new(#f1c453, 0) : color.new(#000000, 100)
+circleYPosition = outSignal
+circleLPosition = outLeader
+//}
+
+
+//-----------------////Plotting////-----------------//{
+plot(MacDLeader ? outLeader : na, title='Jurik MACD Leader', color=leader_color, linewidth=2)
+plot(smd and outMacD ? outMacD : na, title='Jurik MACD', color=macd_color, linewidth=3)
+plot(smd and outSignal ? outSignal : na, title='Signal Line', color=signal_color, style=plot.style_line, linewidth=2)
+plot(sh and outHist ? outHist : na, title='Histogram', color=plot_color, style=plot.style_columns, linewidth=3)
+plot(sd and ta.cross(outMacD, outSignal) ? circleYPosition : na, title='Cross', style=plot.style_circles, linewidth=3, color=circ_color)
+plot(sl and ta.cross(outLeader, outMacD) ? circleLPosition : na, title='Cross', style=plot.style_circles, linewidth=3, color=circ_colorL)
+hline(0, '0 Line', linestyle=hline.style_solid, linewidth=1, color=color.new(#048ba8,0))
+
+//}
+
+//-----------------////Strategy settings////-----------------//{
+//if ta.crossover(outMacD, outSignal)
+//    strategy.entry('Bullish cross', strategy.long, comment='Long')
+//if ta.crossunder(outSignal, outMacd)
+//    strategy.entry('Bearish cross', strategy.short, comment='Short')
+
+//}
+
+//-----------------////Divergence////-----------------//{
+lbR = input(title="Pivot Lookback Right", defval=5, group='Divergence')
+lbL = input(title="Pivot Lookback Left", defval=5, group='Divergence')
+rangeUpper = input(title="Max of Lookback Range", defval=60, group='Divergence')
+rangeLower = input(title="Min of Lookback Range", defval=5, group='Divergence')
+bullColor = color.new(#0db39e, 50)
+bearColor = color.new(#54478c, 50)
+regularBullColor = color.new(#0db39e, 100)
+regularBearColor = color.new(#54478c, 100)
+hiddenBullColor = color.new(#72e1d1, 100)
+hiddenBearColor = color.new(#ff495c, 100)
+noneColor = color.new(#000000, 100)
+textColor = color.white
+
+_inRange(cond) =>
+	bars = ta.barssince(cond == true)
+	rangeLower <= bars and bars <= rangeUpper
+
+//-----------------////MacD Divergence////-----------------//{
+plFoundoutMacD = na(ta.pivotlow(outMacD, lbL, lbR)) ? false : true
+phFoundoutMacD = na(ta.pivothigh(outMacD, lbL, lbR)) ? false : true
+//------------------------------------------------------------------------------
+// Regular Bullish
+// outMacD: Higher Low
+
+outMacDHL = outMacD[lbR] > ta.valuewhen(plFoundoutMacD, outMacD[lbR], 1) and _inRange(plFoundoutMacD[1])
+
+// Price: Lower Low
+
+priceLLoutMacD = low[lbR] < ta.valuewhen(plFoundoutMacD, low[lbR], 1)
+bullCondoutMacD = plotDiv and priceLLoutMacD and outMacDHL and plFoundoutMacD
+
+plot(
+     plFoundoutMacD ? outMacD[lbR] : na,
+     offset=-lbR,
+     title="Regular Bullish",
+     linewidth=2,
+     color=(bullCondoutMacD ? regularBullColor : noneColor)
+     )
+
+plotshape(
+	 bullCondoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bullish Label",
+	 text="M",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// outMacD: Lower Low
+outMacDLL = outMacD[lbR] < ta.valuewhen(plFoundoutMacD, outMacD[lbR], 1) and _inRange(plFoundoutMacD[1])
+
+// Price: Higher Low
+priceHLoutMacD = low[lbR] > ta.valuewhen(plFoundoutMacD, low[lbR], 1)
+hiddenBullCondoutMacD = plotDiv and priceHLoutMacD and outMacDLL and plFoundoutMacD
+
+plot(
+	 plFoundoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish",
+	 linewidth=2,
+	 color=(hiddenBullCondoutMacD ? hiddenBullColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBullCondoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish Label",
+	 text="MH",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Regular Bearish
+// outMacD: Lower High
+outMacDLH = outMacD[lbR] < ta.valuewhen(phFoundoutMacD, outMacD[lbR], 1) and _inRange(phFoundoutMacD[1])
+
+// Price: Higher High
+priceHHoutMacD = high[lbR] > ta.valuewhen(phFoundoutMacD, high[lbR], 1)
+bearCondoutMacD = plotDiv and priceHHoutMacD and outMacDLH and phFoundoutMacD
+
+plot(
+	 phFoundoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish",
+	 linewidth=2,
+	 color=(bearCondoutMacD ? regularBearColor : noneColor)
+	 )
+
+plotshape(
+	 bearCondoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish Label",
+	 text="M",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bearish
+// outMacD: Higher High
+outMacDHH = outMacD[lbR] > ta.valuewhen(phFoundoutMacD, outMacD[lbR], 1) and _inRange(phFoundoutMacD[1])
+
+// Price: Lower High
+priceLHoutMacD = high[lbR] < ta.valuewhen(phFoundoutMacD, high[lbR], 1)
+hiddenBearCondoutMacD = plotDiv and priceLHoutMacD and outMacDHH and phFoundoutMacD
+
+plot(
+	 phFoundoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish",
+	 linewidth=2,
+	 color=(hiddenBearCondoutMacD ? hiddenBearColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBearCondoutMacD ? outMacD[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish Label",
+	 text="MH",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//}
+
+
+//-----------------////Signal Divergence////-----------------//{
+plFoundoutSignal = na(ta.pivotlow(outSignal, lbL, lbR)) ? false : true
+phFoundoutSignal = na(ta.pivothigh(outSignal, lbL, lbR)) ? false : true
+//------------------------------------------------------------------------------
+// Regular Bullish
+// outSignal: Higher Low
+
+outSignalHL = outSignal[lbR] > ta.valuewhen(plFoundoutSignal, outSignal[lbR], 1) and _inRange(plFoundoutSignal[1])
+
+// Price: Lower Low
+
+priceLLoutSignal = low[lbR] < ta.valuewhen(plFoundoutSignal, low[lbR], 1)
+bullCondoutSignal = plotDiv and priceLLoutSignal and outSignalHL and plFoundoutSignal
+
+plot(
+     plFoundoutSignal ? outSignal[lbR] : na,
+     offset=-lbR,
+     title="Regular Bullish",
+     linewidth=2,
+     color=(bullCondoutSignal ? regularBullColor : noneColor)
+     )
+
+plotshape(
+	 bullCondoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bullish Label",
+	 text="S",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// outSignal: Lower Low
+outSignalLL = outSignal[lbR] < ta.valuewhen(plFoundoutSignal, outSignal[lbR], 1) and _inRange(plFoundoutSignal[1])
+
+// Price: Higher Low
+priceHLoutSignal = low[lbR] > ta.valuewhen(plFoundoutSignal, low[lbR], 1)
+hiddenBullCondoutSignal = plotDiv and priceHLoutSignal and outSignalLL and plFoundoutSignal
+
+plot(
+	 plFoundoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish",
+	 linewidth=2,
+	 color=(hiddenBullCondoutSignal ? hiddenBullColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBullCondoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish Label",
+	 text="SH",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Regular Bearish
+// outSignal: Lower High
+outSignalLH = outSignal[lbR] < ta.valuewhen(phFoundoutSignal, outSignal[lbR], 1) and _inRange(phFoundoutSignal[1])
+
+// Price: Higher High
+priceHHoutSignal = high[lbR] > ta.valuewhen(phFoundoutSignal, high[lbR], 1)
+bearCondoutSignal = plotDiv and priceHHoutSignal and outSignalLH and phFoundoutSignal
+
+plot(
+	 phFoundoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish",
+	 linewidth=2,
+	 color=(bearCondoutSignal ? regularBearColor : noneColor)
+	 )
+
+plotshape(
+	 bearCondoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish Label",
+	 text="S",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bearish
+// outSignal: Higher High
+outSignalHH = outSignal[lbR] > ta.valuewhen(phFoundoutSignal, outSignal[lbR], 1) and _inRange(phFoundoutSignal[1])
+
+// Price: Lower High
+priceLHoutSignal = high[lbR] < ta.valuewhen(phFoundoutSignal, high[lbR], 1)
+hiddenBearCondoutSignal = plotDiv and priceLHoutSignal and outSignalHH and phFoundoutSignal
+
+plot(
+	 phFoundoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish",
+	 linewidth=2,
+	 color=(hiddenBearCondoutSignal ? hiddenBearColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBearCondoutSignal ? outSignal[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish Label",
+	 text="SH",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//}
+
+
+//-----------------////Histogram Divergence////-----------------//{
+plFoundoutHist = na(ta.pivotlow(outHist, lbL, lbR)) ? false : true
+phFoundoutHist = na(ta.pivothigh(outHist, lbL, lbR)) ? false : true
+//------------------------------------------------------------------------------
+// Regular Bullish
+// outHist: Higher Low
+
+outHistHL = outHist[lbR] > ta.valuewhen(plFoundoutHist, outHist[lbR], 1) and _inRange(plFoundoutHist[1])
+
+// Price: Lower Low
+
+priceLLoutHist = low[lbR] < ta.valuewhen(plFoundoutHist, low[lbR], 1)
+bullCondoutHist = plotDiv and priceLLoutHist and outHistHL and plFoundoutHist
+
+plot(
+     plFoundoutHist ? outHist[lbR] : na,
+     offset=-lbR,
+     title="Regular Bullish",
+     linewidth=2,
+     color=(bullCondoutHist ? regularBullColor : noneColor)
+     )
+
+plotshape(
+	 bullCondoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bullish Label",
+	 text="H",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// outHist: Lower Low
+outHistLL = outHist[lbR] < ta.valuewhen(plFoundoutHist, outHist[lbR], 1) and _inRange(plFoundoutHist[1])
+
+// Price: Higher Low
+priceHLoutHist = low[lbR] > ta.valuewhen(plFoundoutHist, low[lbR], 1)
+hiddenBullCondoutHist = plotDiv and priceHLoutHist and outHistLL and plFoundoutHist
+
+plot(
+	 plFoundoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish",
+	 linewidth=2,
+	 color=(hiddenBullCondoutHist ? hiddenBullColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBullCondoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish Label",
+	 text="HH",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Regular Bearish
+// outHist: Lower High
+outHistLH = outHist[lbR] < ta.valuewhen(phFoundoutHist, outHist[lbR], 1) and _inRange(phFoundoutHist[1])
+
+// Price: Higher High
+priceHHoutHist = high[lbR] > ta.valuewhen(phFoundoutHist, high[lbR], 1)
+bearCondoutHist = plotDiv and priceHHoutHist and outHistLH and phFoundoutHist
+
+plot(
+	 phFoundoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish",
+	 linewidth=2,
+	 color=(bearCondoutHist ? regularBearColor : noneColor)
+	 )
+
+plotshape(
+	 bearCondoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish Label",
+	 text="H",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//------------------------------------------------------------------------------
+// Hidden Bearish
+// outHist: Higher High
+outHistHH = outHist[lbR] > ta.valuewhen(phFoundoutHist, outHist[lbR], 1) and _inRange(phFoundoutHist[1])
+
+// Price: Lower High
+priceLHoutHist = high[lbR] < ta.valuewhen(phFoundoutHist, high[lbR], 1)
+hiddenBearCondoutHist = plotDiv and priceLHoutHist and outHistHH and phFoundoutHist
+
+plot(
+	 phFoundoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish",
+	 linewidth=2,
+	 color=(hiddenBearCondoutHist ? hiddenBearColor : noneColor)
+	 )
+
+plotshape(
+	 hiddenBearCondoutHist ? outHist[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish Label",
+	 text="HH",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+//}
+
+//}

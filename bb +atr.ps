@@ -1,0 +1,88 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © xinolia(sakura kai)
+//@version=5
+indicator(title='[kai]Keltner&Bolinger', shorttitle='[kai]Keltner&Bolinger', format=format.price, precision=5, timeframe='', timeframe_gaps=true, overlay=true)
+
+volType = input.session('*ochl', title='* volume type 出来高の種別', options=['none', '*source', '*ochl', '*log ohcl'], tooltip = "ex. BTCUSD none=BTCvolume, source * volume,USD volume, vertual volume")
+logmodefg = input.bool(true, title='* log mode log計算', inline = "logmode", tooltip = "Use geometric mean. 幾何平均を使う")
+vwfg = input.bool(false, title='* Volume weighted 出来高加重', tooltip = "Use volume weighted average. 出来高加重平均を使う")
+more0fg = true
+basislength = input.int(20, title='basis Length', minval=1)
+multBB = input.float(2, title='BB StdDev MultFactor', minval=0, step=0.1)
+
+mATRlength = input.int(14, minval=0, title='* mATR length 区間')
+multKC = input.float(2.0, title='KC MultFactor', minval=0, step=0.1)
+
+multipler = input.int(1, minval=1, title='* multipler 倍率', tooltip = "Multiply length by n. For analysis of pseudo-upper leg. lengthをn倍する。疑似上位足の分析用")
+
+cvtlogmode(srcVal) =>
+    logmodefg ? math.log(srcVal) : srcVal
+showexp(srcVal) =>
+    srcVal2 = logmodefg ? math.exp(srcVal) : srcVal
+    more0fg ? math.max(srcVal2, 0) : srcVal2
+showexp2(srcVal) =>
+    logmodefg ? math.exp(srcVal) : srcVal
+source = cvtlogmode(close)
+noneColor = color.new(color.white, 100)
+
+vol = vwfg ? volume : 1.0
+
+//mATR
+
+mtr_func(muletiplelen, logfg) =>  //mTR © sakura kai
+    mhigh = logfg ? math.log(ta.highest(muletiplelen)) : ta.highest(muletiplelen)
+    mlow = logfg ? math.log(ta.lowest(muletiplelen)) : ta.lowest(muletiplelen)
+    mclose = logfg ? math.log(close) : close
+    mtr = math.max(mhigh - mlow, math.abs(mhigh - mclose[muletiplelen]), math.abs(mlow - mclose[muletiplelen]))
+    mtr
+matr(length, muletiplelen, logfg) =>  //mdATR © sakura kai
+	mclose = logfg ? math.log(close) : close
+	mTR = mtr_func(multipler, logfg)
+	mAtr = ta.rma(mTR * vol, length * muletiplelen) / ta.rma(vol, length * muletiplelen)			//RvMA
+
+mAtr = matr(mATRlength, multipler, logmodefg)
+
+pine_vwma(x, y) =>
+    ta.sma(x * vol, y) / ta.sma(vol, y)
+stdv(src, len, avg, vol) =>
+    std = math.pow(src - avg, 2) * vol
+    for i = 1 to len - 1 by 1
+        std += math.pow(src[i] - avg, 2) * vol[i]
+        std
+    std := math.sqrt(std / (ta.sma(vol, len) * len))
+    std
+
+// Calculate BB
+basis = vwfg ? pine_vwma(source, basislength * multipler) : ta.sma(source, basislength * multipler)
+dev = stdv(source, basislength * multipler, basis, vwfg ? nz(volume, 1.0) : 1.0)
+upperBB = basis + dev * multBB
+lowerBB = basis - dev * multBB
+
+// Calculate KC
+
+upperKC = basis + multKC * mAtr
+lowerKC = basis - multKC * mAtr
+
+//bbw count
+
+bbw = nz(dev / mAtr, 1.0)
+
+// Calculate squeeze
+
+sqzOn = bbw < 0.75
+scolorBB = sqzOn ? color.new(color.red, 80) : color.new(color.green, 80)
+
+p2 = plot(showexp(upperBB), color=color.red, linewidth=1, title='upperBB')
+p1 = plot(showexp(upperKC), color=color.blue, linewidth=1, title='upperKC')
+p0 = plot(showexp(basis), color=color.blue, title='Basis')
+p3 = plot(showexp(lowerKC), color=color.blue, linewidth=1, title='lowerKC')
+p4 = plot(showexp(lowerBB), color=color.red, linewidth=1, title='lowerBB')
+fill(p0, p1, color=upperBB >= upperKC ? (sqzOn? scolorBB : color.new(color.blue,75)) :  na)
+fill(p0, p2, color=upperBB >= upperKC ? na :  scolorBB)
+fill(p1, p2, color=upperBB >= upperKC ? scolorBB :  color.new(color.blue,75))
+fill(p0, p3, color=lowerBB <= lowerKC ? (sqzOn? scolorBB : color.new(color.blue,75)) :  na)
+fill(p0, p4, color=lowerBB <= lowerKC ? na :  scolorBB)
+fill(p3, p4, color=lowerBB <= lowerKC ? scolorBB :  color.new(color.blue,75))
+
+alertcondition(ta.crossover(bbw, 1.0), title='break', message='break!')
+alertcondition(ta.crossunder(bbw, 1.0), title='close', message='close!')

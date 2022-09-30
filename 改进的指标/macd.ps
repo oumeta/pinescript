@@ -1,0 +1,49 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Bunghole
+//@version=5
+
+//// Inputs
+indicator(title='MacD', timeframe='')
+
+fast_length = input.int(title="Fast Length", minval = 1, defval=12, group="MACD Parameters")
+slow_length = input.int(title="Slow Length", minval = 1, defval=26, group="MACD Parameters")
+signal_length = input.int(title="Signal Smoothing", minval = 1, maxval = 50, defval = 9, group="MACD Parameters")
+src = input(title="Source", defval=close, group="MACD Parameters")
+
+
+//// Indicator
+[macdLine, signalLine, histLine] = ta.macd(src, fast_length, slow_length, signal_length)
+
+// Conditions
+histA_IsUp = histLine > histLine[1] and histLine > 0
+histA_IsDown = histLine < histLine[1] and histLine > 0
+histB_IsDown = histLine < histLine[1] and histLine <= 0
+histB_IsUp = histLine > histLine[1] and histLine <= 0
+macd_IsAbove = macdLine > signalLine
+macd_IsBelow = macdLine < signalLine
+
+// Colors
+hist_color = histA_IsUp ? #008000 : histA_IsDown ? color.green : histB_IsDown ? #FF0000 : histB_IsUp ? color.red : color.yellow 
+macd_color = macd_IsAbove ? #008000 : #FF0000
+signal_color = color.yellow
+circlePosition = signalLine
+
+// Plot
+plot(macdLine ? macdLine : na, title='MACD', color=macd_color, linewidth=2)
+plot(signalLine ? signalLine : na, title='Signal Line', color=signal_color, style=plot.style_line, linewidth=2)
+plot(histLine ? histLine : na, title='Histogram', color=hist_color, style=plot.style_histogram, linewidth=5)
+plot(ta.cross(macdLine, signalLine) ? circlePosition : na, title='Cross', style=plot.style_circles, linewidth=4, color=macd_color)
+hline(0, '0 Line', linestyle=hline.style_solid, linewidth=1, color=color.white)
+
+
+//// Non-Repainting Alerts
+Long = macdLine < 0 and ta.crossover(macdLine, signalLine)
+Short = macdLine > 0 and ta.crossunder(macdLine, signalLine)
+
+longPosMem = false
+shortPosMem = false
+longPosMem := Long ? true : Short ? false : longPosMem[1]
+shortPosMem := Short ? true : Long ? false : shortPosMem[1]
+
+alertcondition(Long and not longPosMem[1], title='MACD Buy Signal - MACD Indicator', message='MACD Buy Alert - quick, Buy as soon as you can! {{exchange}}:{{ticker}}, price = {{close}}, volume = {{volume}}')
+alertcondition(Short and not shortPosMem[1], title='MACD Sell Signal - MACD Indicator', message='MACD Sell Alert - quick, Sell as soon as you can! {{exchange}}:{{ticker}}, price = {{close}}, volume = {{volume}}')

@@ -1,0 +1,264 @@
+//@version=5
+////Arranged by @ClassicScott
+//Strategy Created by @CheatCode1
+strategy("cci+ema+dmi", 
+         overlay=true,
+         initial_capital=10000,
+         process_orders_on_close=true,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100,
+         commission_type=strategy.commission.percent,
+         commission_value=0.1)
+
+//indicator("Double CCI", "Double CCI", overlay=false, format=format.price, precision=2, timeframe="", timeframe_gaps=false)
+// Function to select the type of source
+get_src(Type) =>
+    if Type == 'VWAP'
+        ta.vwap
+    else if Type == 'Close'
+        close
+    else if Type == 'Open'
+        open
+    else if Type == 'HL2'
+        hl2
+    else if Type == 'HLC3'
+        hlc3
+    else if Type == 'OHLC4'
+        ohlc4
+    else if Type == 'High'
+        high
+    else if Type == 'Low'
+        low
+    else if Type == 'vwap(Close)'
+        ta.vwap(close)
+    else if Type == 'vwap(Open)'
+        ta.vwap(open)
+    else if Type == 'vwap(High)'
+        ta.vwap(high)
+    else if Type == 'vwap(Low)'
+        ta.vwap(low)
+    else if Type == 'AVG(vwap(H,L))'
+        math.avg(ta.vwap(high), ta.vwap(low))
+    else if Type == 'AVG(vwap(O,C))'
+        math.avg(ta.vwap(open), ta.vwap(close))
+    else if Type == 'HLCC4'
+        hlcc4
+
+ 
+show_CCI      = input.bool(true, "═══════ Show Commodity Channel Index 1 ═══════")
+length_CCI    = input.int(54,        "Length", minval=1, inline="cci1")
+MA_Type       = input.string("SMA", "Type", inline='cci1', options=['SMA', 'EMA', 'WMA', "DWMA", 'HMA', 'ALMA', 'LSMA', 'Wild', 'JMA', "COVWMA", "FRAMA", 'RMA', 'DEMA', 'TEMA', 'VWMA', "DVWMA", 'SWMA', 'KAMA', "Zero Lag", "Median"])
+src_CCI       = input.string("HLC3", "Source", inline='cci1', options=['Close', 'Open', 'VWAP', 'HL2', 'HLC3', 'OHLC4', 'HLCC4', 'High', 'Low', 'vwap(Close)', 'vwap(Open)', 'vwap(High)', 'vwap(Low)', 'AVG(vwap(H,L))', 'AVG(vwap(O,C))'])
+
+length_DMI    = input.int(54,        "Length", minval=1, inline="cci1")
+
+smoothing_length=input.int(3, title="Smoothing length")
+
+[plus, minus, adx] = ta.dmi(length_DMI, smoothing_length)
+
+result= plus-minus
+result:=MA_selector(result,smoothing_length)*10
+
+
+
+
+
+
+
+
+
+show_cross    = input.bool(true, "Show crosses at line 100")
+show_signal   = input.bool(false, "Show Signal", inline='signal')
+length_signal = input.int(10,     "Length", minval=5, inline='signal')
+MA_Type_Sig   = input.string("Wild", "Type", inline='signal', options=['SMA', 'EMA', 'WMA', "DWMA", 'HMA', 'ALMA', 'LSMA', 'Wild', 'JMA', "COVWMA", "FRAMA", 'RMA', 'DEMA', 'TEMA', 'VWMA', "DVWMA", 'SWMA', 'KAMA', "Zero Lag", "Median"])
+
+// Based on "BEST Supertrend CCI" - Author: @Daveatt
+// https://www.tradingview.com/script/sT01CTxB-BEST-Supertrend-CCI/
+show_ST = input.bool(true, "SuperTrend Background?", inline='st1', group='SuperTrend')
+ML      = input.int(0,     "CCI Midline Pivot", inline='st1', group='SuperTrend')
+Factor  = input.float(6,   "ATR Factor", minval=1, maxval=100, step=0.1, inline='st2', group='SuperTrend')
+Pd      = input.int(108,     "ATR Period", minval=1, maxval=200, inline='st2', group='SuperTrend')
+
+// Based on "Coloured CCI Histogram V2.0" - Author: @JustUncleL
+// https://www.tradingview.com/script/d9naGmH3-Coloured-CCI-Histogram-V2-0-by-JustUncleL/
+show_CCI2   = input.bool(true, "═══════ Show Commodity Channel Index 2 ═══════")
+length_CCI2 = input.int(18,        "Length", minval=1, inline='cci2')
+MA_Type2    = input.string("SMA",  "Type", inline='cci2', options=['SMA', 'EMA', 'WMA', "DWMA", 'HMA', 'ALMA', 'LSMA', 'Wild', 'JMA', "COVWMA", "FRAMA", 'RMA', 'DEMA', 'TEMA', 'VWMA', "DVWMA", 'SWMA', 'KAMA', "Zero Lag", "Median"])
+src_CCI2    = input.string("HLC3", "Source", inline='cci2', options=['Close', 'Open', 'VWAP', 'HL2', 'HLC3', 'OHLC4', 'HLCC4', 'High', 'Low', 'vwap(Close)', 'vwap(Open)', 'vwap(High)', 'vwap(Low)', 'AVG(vwap(H,L))', 'AVG(vwap(O,C))'])
+uTrad       = input.bool(false, "Use Traditional Formula of @JustUncleL")
+mLevel      = input.int(-200, "Mid Level Trigger Lines +/-", minval=-300)
+hLevel      = input.int(200, "High Level Trigger Lines +/-", minval=10)
+
+// Kaufman's Adaptive Moving Average
+fast = 0.666  // KAMA Fast End
+slow = 0.0645  // KAMA Slow End
+kama(x, t) =>
+    dist = math.abs(x[0] - x[1])
+    signal = math.abs(x - x[t])
+    noise = math.sum(dist, t)
+    effr = noise != 0 ? signal / noise : 1
+    sc = math.pow(effr * (fast - slow) + slow, 2)
+    kama = x
+    kama := nz(kama[1]) + sc * (x - nz(kama[1]))
+    kama
+
+// Jurik Moving Average of @everget
+jma(src, length, power, phase) =>
+    phaseRatio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+    beta = 0.45 * (length - 1) / (0.45 * (length - 1) + 2)
+    alpha = math.pow(beta, power)
+    jma = 0.0
+    e0 = 0.0
+    e0 := (1 - alpha) * src + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := (src - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    jma := e2 + nz(jma[1])
+    jma
+
+// ZLEMA: Zero Lag
+zema(_src, _len) =>
+    alpha = (_len - 1) / 2
+    zlema0 = _src + _src - _src[alpha]
+    zlemaF = ta.ema(zlema0, _len)
+    zlemaF
+
+// COVWMA - Coefficient of Variation Weighted Moving Average of @DonovanWall
+covwma(a, b) =>
+    cov    = ta.stdev(a, b) / ta.sma(a, b)
+    cw     = a*cov
+    covwma = math.sum(cw, b) / math.sum(cov, b)
+
+// FRAMA - Fractal Adaptive Moving Average of @DonovanWall
+w = -4.6 // "Coefficient (if FRAMA)"
+frama(a, b) =>
+    frama = 0.0
+    n3    = (ta.highest(high, b) - ta.lowest(low, b))/b
+    hd2   = ta.highest(high, b/2)
+    ld2   = ta.lowest(low, b/2)
+    n2    = (hd2 - ld2)/(b/2)
+    n1    = (hd2[b/2] - ld2[b/2])/(b/2)
+    dim   = (n1 > 0) and (n2 > 0) and (n3 > 0) ? (math.log(n1 + n2) - math.log(n3))/math.log(2) : 0
+    alpha = math.exp(w*(dim - 1))
+    sc    = (alpha < 0.01 ? 0.01 : (alpha > 1 ? 1 : alpha))
+    frama := ta.cum(1)<=2*b ? a : (a*sc) + nz(frama[1])*(1 - sc)
+    frama
+
+ma(MAType, MASource, MAPeriod) =>
+    if MAPeriod > 0
+        if MAType == 'SMA'
+            ta.sma(MASource, MAPeriod)
+        else if MAType == 'EMA'
+            ta.ema(MASource, MAPeriod)
+        else if MAType == 'WMA'
+            ta.wma(MASource, MAPeriod)
+        else if MAType == 'RMA'
+            ta.rma(MASource, MAPeriod)
+        else if MAType == 'HMA'
+            ta.hma(MASource, MAPeriod)
+        else if MAType == 'DEMA'
+            e = ta.ema(MASource, MAPeriod)
+            2 * e - ta.ema(e, MAPeriod)
+        else if MAType == 'TEMA'
+            e = ta.ema(MASource, MAPeriod)
+            3 * (e - ta.ema(e, MAPeriod)) + ta.ema(ta.ema(e, MAPeriod), MAPeriod)
+        else if MAType == 'VWMA'
+            ta.vwma(MASource, MAPeriod)
+        else if MAType == 'ALMA'
+            ta.alma(MASource, MAPeriod, .85, 6)
+        else if MAType == 'KAMA'
+            kama(MASource, MAPeriod)
+        else if MAType == 'SWMA'
+            ta.swma(MASource)
+        else if MAType == 'JMA'
+            jma(MASource, MAPeriod, 2, 50)
+        else if MAType == 'LSMA'
+            ta.linreg(MASource, MAPeriod, 0)
+        else if MAType == 'Wild'
+            wild = MASource
+            wild := nz(wild[1]) + (MASource - nz(wild[1])) / MAPeriod
+            wild
+        else if MAType == "Median"
+            ta.median(MASource, MAPeriod)
+        else if MAType == "DWMA" // Double Weighted Moving Average
+            ta.wma(ta.wma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "DVWMA" // Double Volume-Weighted Moving Average
+            ta.vwma(ta.vwma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "Zero Lag"
+            zema(MASource, MAPeriod)
+        else if MAType == "COVWMA"
+            covwma(MASource, MAPeriod)
+        else if MAType == "FRAMA"
+            frama(MASource, MAPeriod)
+
+
+
+
+
+            
+
+media = ma(MA_Type, get_src(src_CCI), length_CCI)
+cci = (get_src(src_CCI) - media) / (0.015 * ta.dev(get_src(src_CCI), length_CCI))
+signal_cci = ma(MA_Type_Sig, cci, length_signal)
+
+media2 = ma(MA_Type2, get_src(src_CCI2), length_CCI2)
+cciNT = (get_src(src_CCI2) - media2) / (0.015 * ta.dev(get_src(src_CCI2), length_CCI2))
+cciT = (get_src(src_CCI2) - media2) / (0.015 * ta.dev(math.abs(get_src(src_CCI2) - media2), length_CCI2))
+cci2 = uTrad ? cciT : cciNT
+
+f_supertrend(factor, pd) =>
+    Up = hl2 - factor * ta.atr(pd)
+    Dn = hl2 + factor * ta.atr(pd)
+    TrendUp = 0.0
+    TrendUp := cci[1] > ML ? math.max(Up, TrendUp[1]) : Up
+    TrendDown = 0.0
+    TrendDown := cci[1] < ML ? math.min(Dn, TrendDown[1]) : Dn
+    Trend = 0.0
+    Trend := cci > ML ? 1 : cci < ML ? -1 : nz(Trend[1], 1)
+    Trailingsl = Trend == 1 ? TrendUp : TrendDown
+    Trailingsl
+
+SuperTrend = f_supertrend(Factor, Pd)
+
+
+color_super = open >= SuperTrend ? color.new(#00FE00, 90) : color.new(#FF0000, 90)
+cci_Dn = cci2 < -hLevel ? #FF8080 : cci2 < -mLevel ? #FF3333 : #A30000
+cci_Up = cci2 >  hLevel ? #8080FF : cci2 >  mLevel ? #3333FF : #0000A3
+
+color_cci2 = cci2 >= 0 ? cci_Up : cci_Dn
+
+UPshape = cci > 100 ? cci : na
+DNshape = cci < -100 ? cci : na
+color_cci = cci >= 0 ? color.new(#80FF00, 5) : color.new(#FF4000, 5)
+color_signal = signal_cci > signal_cci[1] ? color.white : color.gray
+cross_dn = cci[0] <  100 and cci[1] >  100
+cross_up = cci[0] > -100 and cci[1] < -100
+
+plot(show_CCI ? cci : na, "CCI", color_cci, 2)
+
+plot(show_CCI ? UPshape : na, "UP Shape",   color.new(#407F00, 25), 4, plot.style_circles)
+plot(show_CCI ? DNshape : na, "DOWN Shape", color.new(#7F2000, 25), 4, plot.style_circles)
+
+plotshape(show_cross ? cross_dn : na, "100 Cross Down", shape.diamond, location.top,    color.new(#FF4000, 0))
+plotshape(show_cross ? cross_up : na, "100 Cross Up",   shape.diamond, location.bottom, color.new(#80FF00, 0))
+plot(show_signal ? signal_cci : na, "Signal(CCI)", color_signal, 2)
+
+//bgcolor(show_ST ? color_super : na, title='SuperTrend Background')
+
+color_cci3=cci2>cci and cci2[1]<cci[1]?color.white:cci2<cci and cci2[1]>cci[1]?color.red:color.gray
+plot(show_CCI2 ? cci2 : na, "CCI Histogram", color_cci3, 2)
+
+
+
+show_CCI2_Columns=cci2>hLevel or cci2<-hLevel
+color_change=cci2>hLevel?color.red:color.green
+//plot(show_CCI2_Columns ? cci2 : na, "CCI Histogram", color.white, 2)
+bgcolor(show_CCI2_Columns ? color_change : na, title='SuperTrend Background')
+
+hUp2 = hline(show_CCI2 ? hLevel : na, "High Upper Band", color.new(#FF0000, 0), hline.style_dotted)
+hUp1 = hline(show_CCI2 or show_CCI ? mLevel : na, "Mid Upper Band", color.new(#FF8080, 0), hline.style_dashed)
+
+hline(show_CCI ? ML : na, "CCI Midline Pivot", color.silver, hline.style_dotted)
+hDn2 = hline(show_CCI2 or show_CCI ? -mLevel : na, 'Mid Lower Band', color.new(#8080FF, 0), hline.style_dashed)
+hDn1 = hline(show_CCI2 ? -hLevel : na, 'High Lower Band', color.new(#4FC0E8, 0), hline.style_dotted)

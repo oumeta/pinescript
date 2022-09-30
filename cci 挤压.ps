@@ -1,0 +1,44 @@
+study("TTM Squeeze")
+src = close
+
+// define TTM length and CCI length
+length = input(title="Length TTM", type=integer, defval=20, minval=0)
+lengthCCI = input(title="length CCI ema", type=integer, defval=10, minval=0)
+cciMultiplier = input(title="CCI Multiplier", type=float, defval=0.015, minval=0.001, maxval=30, step=0.5)
+
+// define timeframes for TTM and Volume Weighted EMA based CCI
+useCurrentRes = input(true, title="TTM: Use Current Chart TF?")
+resCustom = input(title="TTM different TF, uncheck box above", type=resolution, defval="60")
+useCurrentRes2 = input(true, title="CCI: Use Current Chart TF?")
+resCustom2 = input(title="CCI different TF, uncheck Box Above", type=resolution, defval="60")
+res = useCurrentRes ? period : resCustom
+res2 = useCurrentRes2 ? period : resCustom2
+
+// configure bollingerband
+bband(length, mult) => sma(src, length) + mult * stdev(src, length)
+// configure keltner
+keltner(length, mult) => ema(src, length) + mult * ema(tr, length)
+// configure TTM now
+e1 = (highest(high, length) + lowest(low, length)) / 2 + sma(src, length)
+osc = linreg(src - e1 / 2, length, 0)
+diff = bband(length, 2) - keltner(length, 1)
+// configure CCI
+EMAVolPrice = ema(volume * close, lengthCCI)
+EMAVol = ema(volume, lengthCCI)
+srcCCI = EMAVolPrice / EMAVol
+movingAvg = sma(srcCCI, lengthCCI)
+cci = (srcCCI - movingAvg) / (cciMultiplier * dev(srcCCI, lengthCCI))
+
+
+// define histogram and squeeze line colors
+osc_color = osc[1] < osc[0] ? osc[0] >= 0 ? #00ffff : #cc00cc : osc[0] >= 0 ? #009b9b : #ff9bff
+mid_color = diff >= 0 ? green : red
+
+// show histogram and squeeze line on chart
+outHistogram = security(tickerid, res, osc)
+outSqzr = security(tickerid, res, 0)
+outCCI = security(tickerid, res2, cci)
+
+plot(outHistogram, style=histogram, linewidth=2, color=osc_color)
+plot(outSqzr, style=circles, linewidth=3, color=mid_color)
+plot(outCCI, style=line, linewidth=1, color=white)

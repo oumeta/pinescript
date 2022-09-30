@@ -1,0 +1,369 @@
+// @version=5
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © andre_007
+//
+//  █████  ███    ██ ██████  ██████  ███████          ██████   ██████  ███████ 
+// ██   ██ ████   ██ ██   ██ ██   ██ ██              ██  ████ ██  ████      ██ 
+// ███████ ██ ██  ██ ██   ██ ██████  █████           ██ ██ ██ ██ ██ ██     ██  
+// ██   ██ ██  ██ ██ ██   ██ ██   ██ ██              ████  ██ ████  ██    ██   
+// ██   ██ ██   ████ ██████  ██   ██ ███████ ███████  ██████   ██████     ██   
+// THANKS AND CREDITS
+// - Barbara Star (original creator)
+// - ucsgears (arrow logic)
+
+indicator(title="DMI Stochastic Momentum Index", shorttitle="DMI SMI", timeframe="", timeframe_gaps=true, precision=0, format=format.price)
+
+import andre_007/MovingAveragesProxy/1 as MaProxy
+
+// ———————————————————————————————————————— Constants {
+// Moving Averages Types
+var string AARMA    = 'Adaptive Autonomous Recursive Moving Average'
+var string ADEMA    = '* Alpha-Decreasing Exponential Moving Average'
+var string AHMA     = 'Ahrens Moving Average'
+var string ALMA     = 'Arnaud Legoux Moving Average'
+var string ALSMA    = 'Adaptive Least Squares'
+var string AUTOL    = 'Auto-Line'
+var string CMA      = 'Corrective Moving average'
+var string CORMA    = 'Correlation Moving Average Price'
+var string COVWEMA  = 'Coefficient of Variation Weighted Exponential Moving Average'
+var string COVWMA   = 'Coefficient of Variation Weighted Moving Average'
+var string DEMA     = 'Double Exponential Moving Average'
+var string DONCHIAN = 'Donchian Middle Channel'
+var string EDMA     = 'Exponentially Deviating Moving Average'
+var string EDSMA    = 'Ehlers Dynamic Smoothed Moving Average'
+var string EFRAMA   = '* Ehlrs Modified Fractal Adaptive Moving Average'
+var string EHMA     = 'Exponential Hull Moving Average'
+var string EMA      = 'Exponential Moving Average'
+var string EPMA     = 'End Point Moving Average'
+var string ETMA     = 'Exponential Triangular Moving Average'
+var string EVWMA    = 'Elastic Volume Weighted Moving Average'
+var string FAMA     = 'Following Adaptive Moving Average'
+var string FIBOWMA  = 'Fibonacci Weighted Moving Average'
+var string FISHLSMA = 'Fisher Least Squares Moving Average'
+var string FRAMA    = 'Fractal Adaptive Moving Average'
+var string GMA      = 'Geometric Moving Average'
+var string HKAMA    = 'Hilbert based Kaufman\'s Adaptive Moving Average'
+var string HMA      = 'Hull Moving Average'
+var string JURIK    = 'Jurik Moving Average'
+var string KAMA     = 'Kaufman\'s Adaptive Moving Average'
+var string LC_LSMA  = '1LC-LSMA (1 line code lsma with 3 functions)'
+var string LEOMA    = 'Leo Moving Average'
+var string LINWMA   = 'Linear Weighted Moving Average'
+var string LSMA     = 'Least Squares Moving Average'
+var string MAMA     = 'MESA Adaptive Moving Average'
+var string MCMA     = 'McNicholl Moving Average'
+var string MEDIAN   = 'Median'
+var string REGMA    = 'Regularized Exponential Moving Average'
+var string REMA     = 'Range EMA'
+var string REPMA    = 'Repulsion Moving Average'
+var string RMA      = 'Relative Moving Average'
+var string RSIMA    = 'RSI Moving average'
+var string RVWAP    = '* Rolling VWAP'
+var string SMA      = 'Simple Moving Average'
+var string SMMA     = 'Smoothed Moving Average'
+var string SRWMA    = 'Square Root Weighted Moving Average'
+var string SW_MA    = 'Sine-Weighted Moving Average'
+var string SWMA     = '* Symmetrically Weighted Moving Average'
+var string TEMA     = 'Triple Exponential Moving Average'
+var string THMA     = 'Triple Hull Moving Average'
+var string TREMA    = 'Triangular Exponential Moving Average'
+var string TRSMA    = 'Triangular Simple Moving Average'
+var string TT3      = 'Tillson T3'
+var string VAMA     = 'Volatility Adjusted Moving Average'
+var string VIDYA    = 'Variable Index Dynamic Average'
+var string VWAP     = '* VWAP'
+var string VWMA     = 'Volume-weighted Moving Average'
+var string WMA      = 'Weighted Moving Average'
+var string WWMA     = 'Welles Wilder Moving Average'
+var string XEMA     = 'Optimized Exponential Moving Average'
+var string ZEMA     = 'Zero-Lag Exponential Moving Average'
+var string ZSMA     = 'Zero-Lag Simple Moving Average'
+
+var color TRANSPARENT       = color.new(color.white, 100)
+var color COLOR_UP          = color.new(#1aa814, 0)
+var color COLOR_DOWN        = color.new(#ff1000, 0)
+var color COLOR_UP_MKR      = color.new(color.green, 0)
+var color COLOR_DOWN_MKR    = color.new(color.red, 0)
+// ———————————————————————————————————————— }
+
+// ———————————————————————————————————————— Inputs {
+// -->
+var string DMI_HISTO = 'DMI for Histogram'
+
+var lenDIslow = input.int(10, minval=1, title="DI Length", group=DMI_HISTO, inline='10')
+var DIsmoothSlow = input.bool(true, title='Smooth DI?', group=DMI_HISTO, inline='10')
+
+var lenDIsmoothSlow = input.int(2, minval=1, title="DI Smooth", group=DMI_HISTO, inline='11')
+var string typeDISmoothSlow = input.string(defval=SMA, title='Type of Smooth',
+  options=[AARMA,ALSMA,AHMA,ADEMA,ALMA,AUTOL,COVWEMA,COVWMA,CMA,CORMA,DEMA,DONCHIAN,EFRAMA,EDSMA,EVWMA,EPMA,EDMA,EHMA,EMA,ETMA,FIBOWMA,FISHLSMA,FAMA,FRAMA,GMA,HKAMA,HMA,JURIK,KAMA,LC_LSMA,LEOMA,LSMA,LINWMA,MEDIAN,MAMA,MCMA,XEMA,REMA,REGMA,RMA,REPMA,RVWAP,RSIMA,SMA,SW_MA,SRWMA,SMMA,SWMA,TT3,TREMA,TRSMA,TEMA,THMA,VIDYA,VAMA,VWAP,WMA,WWMA,ZEMA,ZSMA],
+  inline='11', group=DMI_HISTO)
+  
+var col_grow_above_slow = input(color.new(#0000FF, 30), "Above Grow", inline="15", group=DMI_HISTO)
+var col_fall_above_slow = input(color.new(#2962ff, 50), "Fall", inline="15", group=DMI_HISTO)
+var col_grow_below_slow = input(color.new(#c2185b, 60), "Below Grow", inline="16", group=DMI_HISTO)
+var col_fall_below_slow = input(color.new(#670438, 60), "Fall", inline="16", group=DMI_HISTO)
+
+// -->
+var string GRP_SMI = 'Stochastic Momentum Index'
+var string sourceStoch = input.string(defval='DMI', title='Source for Stoch Oscilator', options=['DMI', 'Price'], group=GRP_SMI, inline='A')
+float sourcePrice = input.source(close, 'Price', group=GRP_SMI, inline='A', tooltip='Only apply when Source equals Price.')
+
+var stochLongLen = input.int(13, minval=1, title="Stochastic Long Length", group=GRP_SMI, inline='45')
+var stochShortLen = input.int(3, minval=1, title="Stochastic Short Length", group=GRP_SMI, inline='46')
+var stochSigLen = input.int(3, minval=1, title="Stochastic Signal Line Length (Smooth)", group=GRP_SMI, inline='47')
+var string typeSmoothStoch = input.string(defval=SMA, title='Type of Moving Average',
+  options=[AARMA,ALSMA,AHMA,ADEMA,ALMA,AUTOL,COVWEMA,COVWMA,CMA,CORMA,DEMA,DONCHIAN,EFRAMA,EDSMA,EVWMA,EPMA,EDMA,EHMA,EMA,ETMA,FIBOWMA,FISHLSMA,FAMA,FRAMA,GMA,HKAMA,HMA,JURIK,KAMA,LC_LSMA,LEOMA,LSMA,LINWMA,MEDIAN,MAMA,MCMA,XEMA,REMA,REGMA,RMA,REPMA,RVWAP,RSIMA,SMA,SW_MA,SRWMA,SMMA,SWMA,TT3,TREMA,TRSMA,TEMA,THMA,VIDYA,VAMA,VWAP,WMA,WWMA,ZEMA,ZSMA],
+  inline='48', group=GRP_SMI)
+
+// -->
+var string DMI_STOCH = 'DMI for Stochastic Momentum Index'
+var lenDI = input.int(10, minval=1, title="DI Length", group=DMI_STOCH, inline='40')
+var DIsmooth = input.bool(true, title='Smooth DI?', group=DMI_STOCH, inline='40', tooltip='These parameters only apply when Source equals DMI.')
+
+var lenDIsmooth = input.int(2, minval=1, title="DI Smooth", group=DMI_STOCH, inline='41')
+var string typeDISmooth = input.string(defval=SMA, title='Type of Smooth',
+  options=[AARMA,ALSMA,AHMA,ADEMA,ALMA,AUTOL,COVWEMA,COVWMA,CMA,CORMA,DEMA,DONCHIAN,EFRAMA,EDSMA,EVWMA,EPMA,EDMA,EHMA,EMA,ETMA,FIBOWMA,FISHLSMA,FAMA,FRAMA,GMA,HKAMA,HMA,JURIK,KAMA,LC_LSMA,LEOMA,LSMA,LINWMA,MEDIAN,MAMA,MCMA,XEMA,REMA,REGMA,RMA,REPMA,RVWAP,RSIMA,SMA,SW_MA,SRWMA,SMMA,SWMA,TT3,TREMA,TRSMA,TEMA,THMA,VIDYA,VAMA,VWAP,WMA,WWMA,ZEMA,ZSMA],
+  inline='41', group=DMI_STOCH)
+
+var col_grow_above = input.color(color.new(#156d15, 0), "Above Grow", inline="42", group=DMI_STOCH)
+var col_fall_above = input.color(color.new(#114516, 0), "Fall", inline="42", group=DMI_STOCH)
+var col_grow_below = input.color(color.new(#b70ad6, 0), "Below Grow", inline="43", group=DMI_STOCH)
+var col_fall_below = input.color(color.new(#4a148c, 0), "Fall", inline="43", group=DMI_STOCH)
+
+var string themeStoch_1 = input.string(defval='User', title='Theme for Stoch Oscilator',
+  options=['User', 'Gradient', 'Spectrum Blue-Green-Red', 'Monokai'], inline='60', group='Theme')
+    
+var color colorUpStoch_1 = input.color(color.new(color.blue, 0), title='Bull', group='Theme', inline='61')
+var color colorDownStoch_1 = input.color(color.new(COLOR_DOWN, 0), title='Bear', group='Theme', inline='61')
+var int opacityStoch_1 = input.int(0, minval=0, maxval=100, inline='61', title='Opacity', group='Theme')
+
+var string themeStoch_2 = input.string(defval='User', title='Theme for Stoch Signal',
+  options=['User', 'Gradient', 'Spectrum Blue-Green-Red', 'Monokai'], inline='62', group='Theme')
+    
+var color colorUpStoch_2 = input.color(color.new(color.blue, 0), title='Bull', group='Theme', inline='63')
+var color colorDownStoch_2 = input.color(color.new(COLOR_DOWN, 0), title='Bear', group='Theme', inline='63')
+var int opacityStoch_2 = input.int(0, minval=0, maxval=100, inline='63', title='Opacity', group='Theme')
+
+var int opacityStoch_3 = input.int(100, minval=0, maxval=100, inline='63', title='Opacity for fill', group='Theme')
+
+var string CROSS = 'Alerts'
+var string showAlerts    = input.string(title='Show alerts for SMI cross?', defval='Show alerts with shape', options=['Don\'t show alerts', 'Show alerts with char', 'Show alerts with shape'], group=CROSS, inline='A')
+var color colorAlertBull = input.color(color.new(#5b9cf6, 0), title='Bull', group=CROSS, inline='B')
+var color colorAlertBear = input.color(color.new(#f77c80, 0), title='Bear', group=CROSS, inline='B')
+
+var topAlertLine = input.int(60, title='When SMI above', inline='1', group=CROSS)
+var bottomAlertLine = input.int(-60, title='When SMI bellow', inline='1', group=CROSS)
+
+var topAlertCross = input.int(50, title='Fill when SMI above', inline='2', group=CROSS)
+var bottomAlertCross = input.int(-50, title='Fill when SMI bellow', inline='2', group=CROSS)
+
+var color colorOverBought = input.color(color.new(COLOR_DOWN, 85), title='Above', group=CROSS, inline='3')
+var color colorOverSold = input.color(color.new(#0005ee, 75), title='Bellow', group=CROSS, inline='3')
+
+var string BAR_COLORS = 'Bar colors'
+
+var showBarColors = input.bool(true, title='Colorize bars according to DMI Oscillator?', group=BAR_COLORS, inline='A')
+var color colorBarBullDMI = input.color(color.new(#00bcd4, 0), title='DMI above 0', group=BAR_COLORS, inline='A1')
+var color colorBarBearDMI = input.color(color.new(#d900ff, 0), title='DMI below 0', group=BAR_COLORS, inline='A1')
+
+var showBarColors3 = input.bool(true, title='Colorize bars according to DMI Oscillator and SMI?', group=BAR_COLORS, inline='B')
+var color colorBarSuperBullDMI = input.color(color.new(#2862ff, 0), title='DMI above 0 and SMI above MA', group=BAR_COLORS, inline='B')
+var color colorBarSuperBearDMI = input.color(color.new(#ff0000, 0), title='DMI below 0 and SMI bellow MA', group=BAR_COLORS, inline='B')
+
+var showBarColors2 = input.bool(false, title='Colorize bars on signals of SMI?', group=BAR_COLORS, inline='C')
+var color colorBarSignalDMI = input.color(color.new(color.yellow, 0), title='Signal', group=BAR_COLORS, inline='D')
+
+var showBarColors4 = input.bool(true, title='Colorize bars on signals of SMI when trend is same of DMI?', group=BAR_COLORS, inline='E')
+var color colorBarSignalDMItrendBull = input.color(color.new(color.white, 0), title='Inside bullish trend', group=BAR_COLORS, inline='F')
+var color colorBarSignalDMItrendBear = input.color(color.new(color.white, 0), title='Inside bearish trend', group=BAR_COLORS, inline='F')
+// ———————————————————————————————————————— }
+  
+// ———————————————————————————————————————— DI - Directional Moviment Index {
+fCalcDI(_lenDI, _DIsmooth, _typeDISmooth, _lenDIsmooth, _col_grow_above, _col_fall_above, _col_grow_below, _col_fall_below) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    
+    trur = ta.rma(ta.tr, _lenDI)
+    plus = fixnan(100 * ta.rma(plusDM, _lenDI) / trur)
+    minus = fixnan(100 * ta.rma(minusDM, _lenDI) / trur)
+    
+    diff = plus - minus
+    diff := _DIsmooth ? MaProxy.getMovingAverage(type=_typeDISmooth, src=diff, len=_lenDIsmooth, volumeWeighted=false) : diff
+    
+    diffColor = (diff>=0 ? (diff[1] < diff ? _col_grow_above : _col_fall_above) : (diff[1] < diff ? _col_grow_below : _col_fall_below))
+    
+    [diff, diffColor]
+// ———————————————————————————————————————— }
+
+// ———————————————————————————————————————— Colors {
+// @function            Get color for Spectrum Blue-Green-Red theme
+// @param value         (float) Value of stochastic
+// @returns             Color RGB
+fSetColorBGR(float value) =>
+    
+    _value = math.abs(value)
+    
+    switch
+        (_value <= 10) or (_value[1] <= 10) => color.new(#007FFF, 0)
+        (_value > 10 and _value <= 20) or (_value[1] > 10 and _value[1] <= 20)  => color.new(#01b5cc, 0)
+        (_value > 20 and _value <= 30) or (_value[1] > 20 and _value[1] <= 30)  => color.new(#98fb98, 0)
+        (_value > 30 and _value <= 40) or (_value[1] > 30 and _value[1] <= 40)  => color.new(#3af13c, 0)
+        (_value > 40 and _value <= 50) or (_value[1] > 40 and _value[1] <= 50)  => color.new(#32cd32, 0)
+        (_value > 50 and _value <= 60) or (_value[1] > 50 and _value[1] <= 60)  => color.new(#ffeb3b, 0)
+        (_value > 60 and _value <= 70) or (_value[1] > 60 and _value[1] <= 70)  => color.new(#ff6d00, 0)
+        (_value > 70) or (_value[1] > 70)  => color.new(#ff0000, 0)
+      
+// @function            Get color for Monokai theme
+// @param value         (float) Value of stochastic
+// @returns             Color RGB      
+fSetColorMonokai(float value) =>
+    
+    _value = math.abs(value)
+    
+    switch
+        (_value <= 10) or (_value[1] <= 10) => color.new(#a6e22e, 0)
+        (_value > 10 and _value <= 30) or (_value[1] > 10 and _value[1] <= 30)  => color.new(#00fff0, 0)
+        (_value > 30 and _value <= 50) or (_value[1] > 30 and _value[1] <= 50)  => color.new(#8080ff, 0)
+        (_value > 50 and _value <= 60) or (_value[1] > 50 and _value[1] <= 60)  => color.new(#e0e0e0, 0)
+        (_value > 60 and _value <= 70) or (_value[1] > 60 and _value[1] <= 70)  => color.new(#f3ff6c, 0)
+        (_value > 70) or (_value[1] > 70)  => color.new(#f54081, 0)
+
+// @function            Get color for a theme
+// @param _maX          (float) Value of stochastic
+// @param _maY          (float) Value of stochastic
+// @param _colorUp      (color) Value of stochastic
+// @param _colorDown    (color) Value of stochastic
+// @param _theme        (string) Value of stochastic
+// @param _opacity      (int) Value of stochastic
+// @returns             Color RGB    
+getColor(float _maX, float _maY, color _colorUp, color _colorDown, string _theme, int _opacity) =>
+    
+    color spect = fSetColorBGR(_maY)
+    color monokai = fSetColorMonokai(_maY)
+    
+    colorX = switch _theme
+        'User' => color.new( (_maX >= _maY) or _maX >= _maX[1] ? _colorUp : _colorDown, _opacity )
+        'Gradient' => color.from_gradient( _maX > _maX[1] ? _maX : _maX[1], -100, 100, color.new(_colorDown, _opacity), color.new(_colorUp, _opacity) )
+        'Spectrum Blue-Green-Red' => color.new(spect, _opacity)
+        'Monokai' => color.new(monokai, _opacity )
+// ———————————————————————————————————————— }
+  
+// ———————————————————————————————————————— Calcs {
+// DMI for Histogram
+[diffSlow, diffColorSlow] = fCalcDI(lenDIslow, DIsmoothSlow, typeDISmoothSlow, lenDIsmoothSlow, col_grow_above_slow, col_fall_above_slow, col_grow_below_slow, col_fall_below_slow)
+// DMI for Stochastic
+[diff, diffColor] = if sourceStoch == 'DMI' 
+    fCalcDI(lenDI, DIsmooth, typeDISmooth, lenDIsmooth, col_grow_above, col_fall_above, col_grow_below, col_fall_below)
+else
+    [na, na]
+
+// Stochastic Momentum Index
+float _sourceStoch = if sourceStoch == 'DMI'
+    diff
+else
+    sourcePrice
+
+stoch = ta.tsi(_sourceStoch, stochShortLen, stochLongLen) * 100
+maStoch = MaProxy.getMovingAverage(type=typeSmoothStoch, src=stoch, len=stochSigLen, volumeWeighted=false)
+// ———————————————————————————————————————— }
+
+// ———————————————————————————————————————— Plots {
+// --> Lines
+top = hline(100, "Top", color=color.red, linestyle=hline.style_solid, display=display.none)
+bottom = hline(-100, "Bottom", color=color.blue, linestyle=hline.style_solid, display=display.none)
+
+lineAlertTopExtreme = hline(70, "Extreme Overbought", color=color.new(color.red, 0), linestyle=hline.style_solid, display=display.all)
+lineAlertTop = hline(50, "Overbought", color=color.new(color.red, 50), linestyle=hline.style_solid, display=display.all)
+
+lineAlerCenterUp    = hline(25, "Semi-Overbought", color=color.new(color.red, 70), linestyle=hline.style_solid, display=display.all)
+lineAlertCenter     = hline(0, "Center", color=color.new(color.gray, 80), linestyle=hline.style_solid, display=display.all)
+lineAlerCenterDown  = hline(-25, "Semi-Oversold", color=color.new(color.blue, 70), linestyle=hline.style_solid, display=display.all)
+
+lineAlertBottom = hline(-50, "Oversold", color=color.new(color.blue, 50), linestyle=hline.style_solid, display=display.all)
+lineAlertBottomExtreme = hline(-70, "Extreme Oversold", color=color.new(color.blue, 0), linestyle=hline.style_solid, display=display.all)
+
+// DI
+plot(diffSlow, title="DI Histogram", style=plot.style_columns, color=diffColorSlow, linewidth=4)
+plot(diffSlow, title="DI Lines", style=plot.style_line, color=color.new(diffColorSlow, 0), linewidth=3, display=display.all)
+
+plot(diff, title="DI for Stoch", style=plot.style_area, color=diffColor, display=display.none)
+plot(diff, title="DI Lines for Stoch", style=plot.style_line, color=diffColor, linewidth=1, display=display.none)
+
+// Stochchastic
+colorStoch=getColor(stoch, maStoch, colorUpStoch_1, colorDownStoch_1, themeStoch_1, opacityStoch_1)
+colorMaStoch=getColor(stoch, maStoch, colorUpStoch_2, colorDownStoch_2, themeStoch_2, opacityStoch_2)
+
+p_stoch = plot(stoch, color=colorStoch, title='Stochastic Oscilator', linewidth=1, style=plot.style_line)
+p_maStoch = plot(maStoch, color=colorMaStoch, title='Stochastic Signal', linewidth=1, style=plot.style_line)
+fill(p_stoch, p_maStoch, color=getColor(stoch, maStoch, colorUpStoch_2, colorDownStoch_2, themeStoch_2, opacityStoch_3), title='Fill beetween Stoch and Signal', display=display.all)
+
+extremeBear = (stoch <= bottomAlertCross ? true : false)
+extremeBull = (stoch >= topAlertCross ? true : false)
+
+fill(top, bottom, extremeBear ? colorOverSold : na, 'Fill background on bear signal', display=display.all)
+fill(top, bottom, extremeBull ? colorOverBought : na, 'Fill background on bear signal', display=display.all)
+
+// Alerts
+bool crossUp = stoch <= bottomAlertLine and ta.crossover(stoch, maStoch)
+bool crossDown = stoch >= topAlertLine and ta.crossunder(stoch, maStoch)
+
+plotchar(showAlerts == 'Show alerts with char' ? crossUp : na, title="Crossing up char", char='↑', location=location.bottom, color=colorAlertBull, size=size.small, offset=0)
+plotchar(showAlerts == 'Show alerts with char' ? crossDown : na, title="Crossing down char",char='↓', location=location.top, color=colorAlertBear, size=size.small, offset=0)
+
+plotshape(showAlerts == 'Show alerts with shape' and crossUp ? maStoch : na, title="Crossing up shape", location=location.absolute, style=shape.circle, size=size.tiny, color=colorAlertBull, offset=0)
+plotshape(showAlerts == 'Show alerts with shape' and crossDown ? maStoch : na, title="Crossing down shape", location=location.absolute, style=shape.circle, size=size.tiny, color=colorAlertBear, offset=0)
+
+// Color bar
+colorBar = if showBarColors
+    if diffSlow < 0
+        colorBarBearDMI
+    else
+        colorBarBullDMI
+else
+    na
+    
+colorBar := if showBarColors3
+    if diffSlow < 0
+        if stoch < maStoch
+            colorBarSuperBearDMI
+        else
+            colorBar
+    else
+        if stoch >= maStoch
+            colorBarSuperBullDMI
+        else
+            colorBar
+else
+    colorBar
+    
+colorBar := if showBarColors2
+    if crossUp 
+        colorBarSignalDMI
+    else if crossDown
+        colorBarSignalDMI
+    else
+        colorBar
+else
+    colorBar
+    
+colorBar := if showBarColors4
+    if crossUp 
+        if diffSlow >= 0
+            colorBarSignalDMItrendBull
+        else
+            colorBar
+    else if crossDown
+        if diffSlow <= 0
+            colorBarSignalDMItrendBear
+        else
+            colorBar
+    else
+        colorBar
+else
+    colorBar    
+    
+barcolor(colorBar, title='Bar color')
+// ———————————————————————————————————————— }

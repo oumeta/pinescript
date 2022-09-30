@@ -1,0 +1,224 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © capissimo
+
+//@version=5
+
+strategy('Genv Adx', max_bars_back=5000, overlay=true, pyramiding=0, initial_capital=20000, currency='USD', default_qty_type=strategy.percent_of_equity, default_qty_value=100.0, commission_value=0.075)
+
+// ADX Strategy
+
+// Description:
+
+// Generates a long entry signal when the Average Directional Index (ADX)
+// value is greater than the trendlevel and the close is greater than the filter
+// value, and/or generates a short entry signal when the ADX value is greater
+// than the trendlevel and the close is less than the filter value.
+
+// Also, generates a long exit signal when the ADX value crosses
+// under a trigger value, and/or generates a short exit signal when
+// the ADX value crosses over a trigger value.
+
+// The Average Directional Index evaluates the strength of a current trend.
+// The ADX is an oscillator that fluctuates between 0 and 100. Values below
+// 20 indicate a weak trend, values above 40 indicate a strong trend.
+// The direction of the trend is not measured by this indicator.
+
+//-------------------- Inputs
+
+ptype      = input.string('Close','Dataset',               options=['Open','High','Low','Close','HL2','OC2','OHL3','HLC3','OHLC4'])
+//reso       = input.string('',     'Resolution',            input.resolution)
+
+lag        = input.int(20,     'ADX Lag |1..n|',        minval=1)
+trendlevel = input.int(20,     'Trend Level |1..n|',    minval=1)
+filterlag  = input.int(38,     'Filter Lag |1..n|',     minval=1)
+extmethod  = input.string('Trend','Exit Method',           options=['Index','Trend'])
+exittype   = input.string('Short','Exit Type',             options=['Short','Long','Both'])
+
+ftype      = input.string('None', 'Filter Signals by',     options=['Volatility','Volume','Both','None'])
+holding_p  = input.int(5,      'Holding Period |1..n|', minval=1)
+
+//-------------------- System Variables
+
+var int BUY  =  1
+var int SELL = -1
+var int HOLD =  0
+
+//-------------------- Series
+
+var int  signal     = HOLD
+var int  hp_counter = 0
+var bool longex     = na
+var bool shortex    = na
+
+//-------------------- Custom Functions
+
+volumeBreak(thres) =>
+    rsivol   = ta.rsi(volume, 14)
+    osc      = ta.hma(rsivol, 10)
+    osc > thres
+
+volatilityBreak(volmin, volmax) => ta.atr(volmin) > ta.atr(volmax)
+
+//-------------------- Logic
+
+tbase   = (time - time[1]) / 1000
+tcurr   = (timenow - time_close[1]) / 1000
+barlife = tcurr / tbase
+
+filter =   ftype=='Volatility' ? volatilityBreak(1, 10)
+         : ftype=='Volume'     ? volumeBreak(49)
+         : ftype=='Both'       ? volatilityBreak(1, 10) and volumeBreak(49)
+         :                       true
+
+dset   =   ptype=='Open'  ? open
+         : ptype=='High'  ? high
+         : ptype=='Low'   ? low
+         : ptype=='Close' ? close
+         : ptype=='OC2'   ? (open+close)/2
+         : ptype=='HL2'   ? hl2
+         : ptype=='OHL3'  ? (open+high+low)/3
+         : ptype=='HLC3'  ? hlc3
+         :                  ohlc4
+
+//dataset = security('', reso, dset)
+dataset = dset
+f_dema(src,len)=>
+    e = ta.ema(src, len)
+    result = 2 * e - ta.ema(e, len)
+    result
+
+[_, _, adx] = ta.dmi(lag, lag)
+//filterval   = ta.alma(dataset, filterlag,0.775,4.5)
+
+filterval   = ta.ema(dataset, filterlag)
+
+signal :=  adx>trendlevel and dataset>filterval and filter ? BUY : adx>trendlevel and dataset<filterval and filter  ? SELL : nz(signal[1])
+
+changed = ta.change(signal)
+
+hp_counter := changed ? 0 : hp_counter + 1
+
+if extmethod=='Index'
+	longex  := ta.crossunder(adx, trendlevel) and (exittype != 'Short')
+	shortex := ta.crossunder(adx, trendlevel) and (exittype != 'Long')
+
+if extmethod =='Trend'
+	longex  := ta.crossunder(close, filterval) and (exittype != 'Short')
+	shortex := ta.crossunder(close, filterval) and (exittype != 'Long')
+
+startLongTrade  = changed and signal==BUY
+startShortTrade = changed and signal==SELL
+endLongTrade    = longex  or (changed and signal==SELL) or (signal==BUY  and hp_counter==holding_p and not changed)
+endShortTrade   = shortex or (changed and signal==BUY)  or (signal==SELL and hp_counter==holding_p and not changed)
+
+//-------------------- Visualization
+
+plotshape(startLongTrade  ? low   : na, 'Buy',      shape.labelup,   location.belowbar, color.blue, 30, size=size.small)
+plotshape(startShortTrade ? high  : na, 'Sell',     shape.labeldown, location.abovebar, color.red,  30, size=size.small)
+plot(endLongTrade         ? ohlc4 : na, 'StopBuy',  color.blue, 3, plot.style_cross)
+plot(endShortTrade        ? ohlc4 : na, 'StopSell', color.red,  3, plot.style_cross)
+
+plot(startLongTrade  ? low : startShortTrade ? high : na, '', color.blue, 2, plot.style_stepline)
+
+//-------------------- Notification
+
+if changed and signal==BUY
+    strategy.entry('Long', strategy.long)
+
+        //alert(message=alertSyntaxBase + 'side:long', freq=alert.freq_once_per_bar_close)
+
+    alert('Buy Alert', alert.freq_once_per_bar)  // alert.freq_once_per_bar_close
+if changed and signal==SELL
+    strategy.entry('Short', strategy.short)
+    alert('Sell Alert', alert.freq_once_per_bar)
+if endLongTrade
+    strategy.close('Long')
+if endShortTrade
+    strategy.close('Short')
+
+alertcondition(startLongTrade,  'Buy Alert',  'Go Long!')
+alertcondition(startShortTrade, 'Sell Alert', 'Go Short!')
+
+var label lbl = na
+
+rsivol   = ta.rsi(volume, 14)
+
+osc      = ta.hma(rsivol, 10)
+
+var t = table.new(position.top_right,  rows=3, columns = 2)
+table.cell(t, 0, 0, "adx", text_color = color.blue) 
+table.cell(t, 1, 0, str.tostring(adx,             '#.#'), text_color = color.blue)
+table.cell(t, 0, 1, "rsi", text_color = color.blue) 
+table.cell(t, 1, 1, str.tostring(rsivol,             '#.#'), text_color = color.blue)
+table.cell(t, 0, 2, "osc", text_color = color.blue) 
+table.cell(t, 1, 2, str.tostring(osc,             '#.#'), text_color = color.blue)
+
+
+
+// info1 =  ptype
+//       + '\n adx='        + str.tostring(adx,             '#.#')
+//       + '\n rsi: '   + str.tostring(rsivol[1],           '#')
+//       + '\n osc: ' + str.tostring(osc[1], '#.##')
+//       + '\n atr: '  + str.tostring(ta.atr(1)[1], '#.#%')
+//       + '\n atr: '  + str.tostring(ta.atr(10)[1], '#.#%')
+
+//       + '\nfilterval: ' + str.tostring(filterval[1],               '#.#%')
+
+ 
+ 
+// var label1 = label.new(0,0, text=info1)
+// label.set_x(label1, 0)
+// label.set_xloc(label1, time, xloc.bar_time)
+// label.set_color(label1, color.red)
+// label.set_size(label1, size.large)
+
+
+//-------------------- Backtest
+
+show_info = input.bool(true, '===Information===')
+lot_size  = input.float(0.01,  'Lot Size', options=[0.01,0.1,0.2,0.3,0.5,1,2,3,5,10,20,30,50,100,1000])
+
+bidask = open //-- (open+high+low)/3 is less optimistic
+
+var float start_long_trade  = bidask
+var float long_trades       = 0.
+var float start_short_trade = bidask
+var float short_trades      = 0.
+var int   wins              = 0
+var int   trade_count       = 0
+
+if startLongTrade
+    start_long_trade := bidask
+if endLongTrade
+    ldiff         = (bidask - start_long_trade)
+    wins         := ldiff > 0 ? 1 : 0
+    long_trades  := ldiff * lot_size
+    trade_count  := 1
+if startShortTrade
+    start_short_trade := bidask
+if endShortTrade
+    sdiff         = (start_short_trade - bidask)
+    wins         := sdiff > 0 ? 1 : 0
+    short_trades := sdiff * lot_size
+    trade_count  := 1
+
+cumreturn   = ta.cum(long_trades) + ta.cum(short_trades)  //-- cumulative return
+totaltrades = ta.cum(trade_count)
+totalwins   = ta.cum(wins)
+totallosses = totaltrades - totalwins == 0 ? 1 : totaltrades - totalwins
+
+//------------------- Information
+
+ 
+
+info =  ptype
+      + '\nCR='        + str.tostring(cumreturn,             '#.#')
+      + '\nTrades: '   + str.tostring(totaltrades,           '#')
+      + '\nWin/Loss: ' + str.tostring(totalwins/totallosses, '#.##')
+      + '\nWinrate: '  + str.tostring(totalwins/totaltrades, '#.#%')
+      + '\nBar Time: ' + str.tostring(barlife,               '#.#%')
+
+if show_info and barstate.islast
+    lbl := label.new(bar_index, ohlc4, info, xloc.bar_index, yloc.price,
+                     color.new(color.blue, 100), label.style_label_left, color.black, size.small, text.align_left)
+    label.delete(lbl[1])

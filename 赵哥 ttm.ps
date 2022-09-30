@@ -1,0 +1,815 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © OskarGallard
+
+//@version=5
+
+indicator(shorttitle="SQZMOM [+]", title="Squeeze Momentum [Plus]", overlay=false)
+// Function to select the type of source
+get_src(Type) =>
+    if Type == "VWAP"
+        ta.vwap
+    else if Type == "Close"
+        close
+    else if Type == "Open"
+        open
+    else if Type == "HL2"
+        hl2
+    else if Type == "HLC3"
+        hlc3
+    else if Type == "OHLC4"
+        ohlc4
+    else if Type == "HLCC4"
+        hlcc4
+    else if Type == "Volume"
+        nz(volume) * (high - low)
+    else if Type == "High"
+        high
+    else if Type == "Low"
+        low
+    else if Type == "vwap(Close)"
+        ta.vwap(close)
+    else if Type == "vwap(Open)"
+        ta.vwap(open)
+    else if Type == "vwap(High)"
+        ta.vwap(high)
+    else if Type == "vwap(Low)"
+        ta.vwap(low)
+    else if Type == "AVG(vwap(H,L))"
+        math.avg(ta.vwap(high), ta.vwap(low))
+    else if Type == "AVG(vwap(O,C))"
+        math.avg(ta.vwap(open), ta.vwap(close))
+    else if Type == "OBV" // On Balance Volume
+        ta.obv
+    else if Type == "AccDist" // Accumulation Distribution
+        ta.accdist
+    else if Type == "PVT" // Price Volume Trend
+        ta.pvt
+
+// Kaufman's Adaptive Moving Average - Fast and Slow Ends
+fastK = 0.666 // KAMA Fast End
+slowK = 0.0645 // KAMA Slow End
+kama(x, t)=>
+    dist   = math.abs(x[0] - x[1])
+    signal = math.abs(x - x[t])
+    noise  = math.sum(dist, t)
+    effr   = noise != 0 ? signal/noise : 1
+    sc     = math.pow(effr*(fastK - slowK) + slowK,2)
+    KAMA   = x
+    KAMA  := nz(KAMA[1]) + sc*(x - nz(KAMA[1]))
+    KAMA
+
+// Jurik Moving Average of @everget
+jma(src, length, power, phase) => 
+    phaseRatio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+    beta = 0.45 * (length - 1) / (0.45 * (length - 1) + 2)
+    alpha = math.pow(beta, power)
+    JMA = 0.0
+    e0 = 0.0
+    e0 := (1 - alpha) * src + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := (src - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(JMA[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    JMA := e2 + nz(JMA[1])
+    JMA
+
+cti(sm, src, cd) =>
+    di = (sm - 1.0) / 2.0 + 1.0
+    c1 = 2 / (di + 1.0)
+    c2 = 1 - c1
+    c3 = 3.0 * (cd * cd + cd * cd * cd)
+    c4 = -3.0 * (2.0 * cd * cd + cd + cd * cd * cd)
+    c5 = 3.0 * cd + 1.0 + cd * cd * cd + 3.0 * cd * cd
+    i1 = 0.0
+    i2 = 0.0
+    i3 = 0.0
+    i4 = 0.0
+    i5 = 0.0
+    i6 = 0.0
+    i1 := c1*src + c2*nz(i1[1])
+    i2 := c1*i1 + c2*nz(i2[1])
+    i3 := c1*i2 + c2*nz(i3[1])
+    i4 := c1*i3 + c2*nz(i4[1])
+    i5 := c1*i4 + c2*nz(i5[1])
+    i6 := c1*i5 + c2*nz(i6[1])
+        
+    bfr = -cd*cd*cd*i6 + c3*(i5) + c4*(i4) + c5*(i3)
+    bfr
+    
+a = 0.618
+T3ma(src,Len) =>
+    e1 = ta.ema(src, Len)
+    e2 = ta.ema(e1, Len)
+    e3 = ta.ema(e2, Len)
+    e4 = ta.ema(e3, Len)
+    e5 = ta.ema(e4, Len)
+    e6 = ta.ema(e5, Len)
+    C1 = -a*a*a
+    C2 = 3*a*a+3*a*a*a
+    C3 = -6*a*a-3*a-3*a*a*a
+    C4 = 1+3*a+a*a*a+3*a*a
+    C1*e6+C2*e5+C3*e4+C4*e3
+
+VIDYA(src,Len) =>
+    mom     = ta.change(src)
+    upSum   = math.sum(math.max(mom, 0), Len)
+    downSum = math.sum(-math.min(mom, 0), Len)
+    out     = (upSum - downSum) / (upSum + downSum)
+    cmo     = math.abs(out)
+    alpha   = 2 / (Len + 1)
+    vidya   = 0.0
+    vidya   := src * alpha * cmo + nz(vidya[1]) * (1 - alpha * cmo)
+    vidya
+
+// ZLEMA: Zero Lag
+zema(_src, _len) =>
+    _alpha = (_len - 1) / 2
+    _zlema0 = (_src + (_src - _src[_alpha]))
+    _zlemaF = ta.ema(_zlema0, _len)
+
+// ADX Weighted Moving Average of @Duyck 
+adx_weighted_ma(_src, _period) =>
+    [_diplus, _diminus, _adx] = ta.dmi(17, 14)
+    _vol_sum  = 0.0
+    _adx_sum  = 0.0
+    for i = 0 to _period
+        _vol_sum  := _src[i] * _adx[i] + _vol_sum
+        _adx_sum  := _adx[i] + _adx_sum 
+    _volwma   = _vol_sum / _adx_sum
+
+// COVWMA - Coefficient of Variation Weighted Moving Average of @DonovanWall
+covwma(a, b) =>
+    cov    = ta.stdev(a, b) / ta.sma(a, b)
+    cw     = a*cov
+    covwma = math.sum(cw, b) / math.sum(cov, b)
+
+// FRAMA - Fractal Adaptive Moving Average of @DonovanWall
+w = -4.6 // "Coefficient (if FRAMA)"
+frama(a, b) =>
+    frama = 0.0
+    n3    = (ta.highest(high, b) - ta.lowest(low, b))/b
+    hd2   = ta.highest(high, b/2)
+    ld2   = ta.lowest(low, b/2)
+    n2    = (hd2 - ld2)/(b/2)
+    n1    = (hd2[b/2] - ld2[b/2])/(b/2)
+    dim   = (n1 > 0) and (n2 > 0) and (n3 > 0) ? (math.log(n1 + n2) - math.log(n3))/math.log(2) : 0
+    alpha = math.exp(w*(dim - 1))
+    sc    = (alpha < 0.01 ? 0.01 : (alpha > 1 ? 1 : alpha))
+    frama := ta.cum(1)<=2*b ? a : (a*sc) + nz(frama[1])*(1 - sc)
+    frama
+
+// EMA RSI Adaptive of @glaz
+rsi_ema(src, period) =>
+    RsiPeriod = 14
+    ema = 0.0
+    RSvoltl = math.abs(ta.rsi(close, RsiPeriod)-50)+1.0
+    multi   = (5.0+100.0/RsiPeriod) / (0.06+0.92*RSvoltl+0.02*math.pow(RSvoltl,2))
+    pdsx    = multi*period
+    alpha   = 2.0 /(1.0+pdsx)
+    ema     := nz(ema[1])+alpha*(ta.sma(close, period)-nz(ema[1]))
+    ema
+
+ma(MAType, MASource, MAPeriod) =>
+    if MAPeriod > 0
+        if MAType == "SMA"
+            ta.sma(MASource, MAPeriod)
+        else if MAType == "EMA"
+            ta.ema(MASource, MAPeriod)
+        else if MAType == "WMA"
+            ta.wma(MASource, MAPeriod)
+        else if MAType == "RMA"
+            ta.rma(MASource, MAPeriod)
+        else if MAType == "HMA"
+            ta.hma(MASource, MAPeriod)
+        else if MAType == "DEMA"
+            e = ta.ema(MASource, MAPeriod)
+            2 * e - ta.ema(e, MAPeriod)
+        else if MAType == "TEMA"
+            e = ta.ema(MASource, MAPeriod)
+            3 * (e - ta.ema(e, MAPeriod)) + ta.ema(ta.ema(e, MAPeriod), MAPeriod)
+        else if MAType == "VWMA"
+            ta.vwma(MASource, MAPeriod)
+        else if MAType == "ALMA"
+            ta.alma(MASource, MAPeriod, .85, 6)
+        else if MAType == "CTI"
+            cti(MAPeriod, MASource, 0)
+        else if MAType == "KAMA"
+            kama(MASource, MAPeriod)
+        else if MAType == "SWMA" 
+            ta.swma(MASource)
+        else if MAType == "JMA"
+            jma(MASource, MAPeriod, 2, 50)
+        else if MAType == "LSMA" // Least Squares
+            ta.linreg(MASource, MAPeriod, 0) 
+        else if MAType == "Wild"
+            wild = MASource
+            wild := nz(wild[1]) + (MASource - nz(wild[1])) / MAPeriod
+        else if MAType == "Tillson T3"
+            T3ma(MASource, MAPeriod)
+        else if MAType == "VIDYA"
+            VIDYA(MASource, MAPeriod)
+        else if MAType == "DWMA" // Double Weighted Moving Average
+            ta.wma(ta.wma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "DVWMA" // Double Volume-Weighted Moving Average
+            ta.vwma(ta.vwma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "Zero Lag"
+            zema(MASource, MAPeriod)
+        else if MAType == "Median"
+            ta.median(MASource, MAPeriod)
+        else if MAType == "RSI EMA"
+            rsi_ema(MASource, MAPeriod)
+        else if MAType == "ADX MA"
+            adx_weighted_ma(MASource, MAPeriod)
+        else if MAType == "COVWMA"
+            covwma(MASource, MAPeriod)
+        else if MAType == "FRAMA"
+            frama(MASource, MAPeriod)
+
+// Input - Squeeze Momentum Indicator
+show_Momen = input.bool(true,    "▷ Show Momentum ", inline="mom", group="Squeeze Momentum Indicator")
+color_M    = input.int(3,        "Color Format", minval=1, maxval=5, inline="mom", group="Squeeze Momentum Indicator")
+bgoff      = input.bool(true,    "Background Off", inline="mom", group="Squeeze Momentum Indicator")
+lengthM    = input.int(20,       "MOM Length", minval=1, step=1, inline="M", group="Squeeze Momentum Indicator")
+srcM       = input.source(close, "Source", inline="M", group="Squeeze Momentum Indicator")
+typeMom    = input.string('SMA', "Type", inline = "M", group="Squeeze Momentum Indicator", options=["SMA", "EMA", "WMA", "DWMA", "ALMA", "VWMA", "DVWMA", "HMA", "Wild", "JMA", "KAMA", "Zero Lag", "Tillson T3", "VIDYA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+show_sqz   = input.bool(true,    "Show Squeeze [SQZ]", inline="S", group="Squeeze Momentum Indicator")
+length     = input.int(20,       "Length",  minval=1, step=1, inline="S", group="Squeeze Momentum Indicator")
+src        = input.source(ohlc4, "Source", inline="S", group="Squeeze Momentum Indicator")
+bbmatype   = input.string('SMA', "BB Calculation Type", inline = "bb", group="Squeeze Momentum Indicator", options=["SMA", "EMA", "WMA", "DWMA", "ALMA", "VWMA", "DVWMA", "HMA", "LSMA", "Wild", "JMA", "Zero Lag", "Tillson T3", "VIDYA", "KAMA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+multBB     = input.float(2.0 ,   "BB MultFactor", step=0.25, inline = "bb", group="Squeeze Momentum Indicator") //Bollinger Bands Multiplier
+kcmatype   = input.string('EMA', "Keltner Channel Calculation Type", inline = "kc", group="Squeeze Momentum Indicator", options=["SMA", "EMA", "WMA", "DWMA", "ALMA", "VWMA", "DVWMA", "HMA", "LSMA", "Wild", "JMA", "Zero Lag", "Tillson T3", "VIDYA", "KAMA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+useTR      = input.bool(true,    "Use TrueRange (KC)", inline = "kc", group="Squeeze Momentum Indicator")
+drdiv      = input.bool(true,    "Draw Divergence", inline="l1", group="Squeeze Momentum Indicator")
+zeroSQZ    = input.bool(false,   "SQZ Zero Line", inline="l1", group="Squeeze Momentum Indicator")
+darkm      = input.bool(false,   "Gray Background for Dark Mode", inline="l1", group="Squeeze Momentum Indicator")
+
+// Input - ADX and DMI
+scale     = input.float(55.0,        "Scala for ADX", inline="dmi0", group="Directional Movement Index")
+pos       = input.color(color.white, "Positive slope", inline="dmi0", group="Directional Movement Index") 
+neg       = input.color(color.gray,  "Negative slope", inline="dmi0", group="Directional Movement Index") 
+show_ADX  = input.bool(true,         "Show ADX", inline="showDMI", group="Directional Movement Index")
+show_DMI  = input.bool(true,         "Show Colored DMI", inline="showDMI", group="Directional Movement Index")
+hideLabel = input.bool(false,        "▷ Hide DMI Label ◁", inline= "showDMI", group="Directional Movement Index")
+adxlen    = input.int(14,            "ADX Smoothing", minval=1, maxval=50, group="Directional Movement Index")
+dilen     = input.int(14,            "DI Length", minval=1, group="Directional Movement Index") 
+keyLevel  = input.int(23,            "Key level for ADX", group="Directional Movement Index")
+weakTrend = input.int(15,            "Weak Trend Theshold", group="Directional Movement Index")
+histLabel = input.int(0    ,         "Historical Label Readings", minval=0, group="Directional Movement Index")
+keyColor  = input.bool(false,        "KeyLevel with color DMI", inline="k_level", group="Directional Movement Index")
+distance  = input.int(-5,            "Distance between KeyLevel and 0", inline="k_level", group="Directional Movement Index") 
+detect_bull_dmi = input.bool(false, '◁ Alert: Bullish Trend', inline='alert_dmi', group='Directional Movement Index')
+detect_bear_dmi = input.bool(false, '◁ Alert: Bearish Trend', inline='alert_dmi', group='Directional Movement Index')
+
+// Input - Hull Moving Average
+show_Hull = input.bool(false,     "Show Hull Signal", inline="hull0", group="Hull Moving Average")
+bg_Hull   = input.bool(true,      "Background Hull",  inline="hull0", group="Hull Moving Average")
+h_Length  = input.int(55,         "Length", minval=1, step=1, inline = "hull", group="Hull Moving Average")
+h_type    = input.string("HMA",   "Type", options=["HMA", "EHMA", "THMA", "AHMA"], inline = "hull", group="Hull Moving Average")
+h_src     = input.string("Close", "Source", inline = "hull", group="Hull Moving Average", options=["Close", "Open", "HL2", "HLC3", "OHLC4", "HLCC4", "VWAP", "High", "Low", "vwap(Close)", "vwap(Open)", "vwap(High)", "vwap(Low)", "AVG(vwap(H,L))", "AVG(vwap(O,C))", "OBV", "AccDist", "PVT", "Volume"])
+
+// Input - Williams Vix Fix
+sbcFilt  = input.bool(false, "Show Signal For Filtered Entry [▲ FE ]", group="Williams Vix Fix") // Use FILTERED Criteria
+sbcAggr  = input.bool(false, "Show Signal For AGGRESSIVE Filtered Entry [▲ AE ]", group="Williams Vix Fix") // Use FILTERED Criteria
+sbc      = input.bool(false, "Show Signal if WVF WAS True and IS Now False [▼]", group="Williams Vix Fix") // Use Original Criteria
+sbcc     = input.bool(false, "Show Signal if WVF IS True [▼]", group="Williams Vix Fix") // Use Original Criteria
+alert_AE = input.bool(false, '◁ Alert: [AGGRESSIVE Entry]', inline='AlertVF', group='Williams Vix Fix')
+alert_FE = input.bool(false, '◁ Alert: [Filtered Entry]', inline='AlertVF', group='Williams Vix Fix')
+// Inputs Tab Criteria
+pd      = input.int(22,    "LookBack Period Standard Deviation High", group="Williams Vix Fix")
+bbl     = input.int(20,    "Bolinger Band Length", group="Williams Vix Fix")
+mult    = input.float(2.0, "Bollinger Band Standard Devaition Up", minval=1, maxval=5, group="Williams Vix Fix")
+lb      = input.int(50,    "Look Back Period Percentile High", group="Williams Vix Fix")
+ph      = input.float(.85, "Highest Percentile - 0.90=90%, 0.95=95%, 0.99=99%", group="Williams Vix Fix")
+ltLB    = input.int(40, minval=25, maxval=99, title="Long-Term Look Back Current Bar Has To Close Below This Value OR Medium Term--Default=40", group="Williams Vix Fix")
+mtLB    = input.int(14, minval=10, maxval=20, title="Medium-Term Look Back Current Bar Has To Close Below This Value OR Long Term--Default=14", group="Williams Vix Fix")
+str     = input.int(3,  minval=1,  maxval=9,  title="Entry Price Action Strength--Close > X Bars Back---Default=3", group="Williams Vix Fix")
+
+// Input - Elliott Wave Oscillator
+show_EWO   = input.bool(false,   "▷ Show EWO Breaking Bands", inline="ewo0", group="Elliott Wave Oscillator")
+diver_EWO  = input.bool(true,    "Draw Divergence", inline="ewo0", group="Elliott Wave Oscillator")
+bg_EWO     = input.bool(false,   "Background", inline="ewo0", group="Elliott Wave Oscillator")
+ma_fast    = input.int(5,        "Fast MA", inline="Fast", group="Elliott Wave Oscillator")
+type_fast  = input.string("SMA", "Fast MA Type", inline="Fast", group="Elliott Wave Oscillator", options=["SMA", "EMA", "WMA", "DWMA", "ALMA", "VWMA", "DVWMA", "HMA", "LSMA", "Wild", "JMA", "Zero Lag", "Tillson T3", "VIDYA", "KAMA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+ma_slow    = input.int(34,       "Slow MA", inline="Slow", group="Elliott Wave Oscillator")
+type_slow  = input.string("SMA", "Slow MA Type", inline="Slow", group="Elliott Wave Oscillator", options=["SMA", "EMA", "WMA", "ALMA", "DWMA", "VWMA", "DVWMA", "HMA", "LSMA", "Wild", "JMA", "Zero Lag", "Tillson T3", "VIDYA", "KAMA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+SRC        = input.string("HL2", "Source", inline="ewo1", group="Elliott Wave Oscillator", options=["VWAP", "Close", "Open", "HL2", "HLC3", "OHLC4", "HLCC4", "High", "Low", "vwap(Close)", "vwap(Open)", "vwap(High)", "vwap(Low)", "AVG(vwap(H,L))", "AVG(vwap(O,C))", "OBV", "AccDist", "PVT", "Volume"])
+show_bands = input.bool(true,    "Show Breaking Bands", inline="ewo1", group="Elliott Wave Oscillator")
+signal_ewo = input.bool(true,    "Show Signal(EWO)", inline="ewo2", group="Elliott Wave Oscillator")
+Len        = input.int(1,        "Length", minval=1, inline="ewo2", group="Elliott Wave Oscillator") 
+
+// Input - Expert Trend Locator
+candles_XTL = input.bool(false,     "Use XTL Bars Color", group="Expert Trend Locator")
+period_xtl  = input.int(26,         "Length", minval=2, inline="xtl", group="Expert Trend Locator")
+MA_Type2    = input.string("DVWMA", "Type", inline="xtl", group="Expert Trend Locator", options=["SMA", "EMA", "WMA", "DWMA", "ALMA", "VWMA", "DVWMA", "HMA", "LSMA", "Wild", "JMA", "Zero Lag", "Tillson T3", "VIDYA", "KAMA", "CTI", "RMA", "DEMA", "TEMA", "SWMA", "Median", "COVWMA", "FRAMA", "ADX MA", "RSI EMA"])
+src_xtl     = input.string("HLC3",  "Source", inline="xtl", group="Expert Trend Locator", options=["VWAP", "Close", "Open", "HL2", "HLC3", "OHLC4", "HLCC4", "High", "Low", "vwap(Close)", "vwap(Open)", "vwap(High)", "vwap(Low)", "AVG(vwap(H,L))", "AVG(vwap(O,C))", "OBV", "AccDist", "PVT", "Volume"])
+fixed_Value = input.int(37,         "Threshold Level", minval=10, group="Expert Trend Locator", inline="xtl2")
+uTrad       = input.bool(false,     "Use the traditional CCI formula", group="Expert Trend Locator", inline="xtl2")
+color_xtlUP = input.color(#00BFFF,  "Trend Up",   group="Expert Trend Locator", inline="ColXTL")
+color_xtlNe = input.color(#FFFFFF,  "Neutral",    group="Expert Trend Locator", inline="ColXTL")
+color_xtlDN = input.color(#FF4000,  "Trend Down", group="Expert Trend Locator", inline="ColXTL")
+
+// Divergences
+group_divergences = "Divergences For Momentum and Elliott Wave Oscillator"
+plotBull              = input.bool(true,  "Plot Bullish", inline="bull", group=group_divergences)
+plotHiddenBull        = input.bool(false, "Plot Hidden Bullish", inline="bull", group=group_divergences)
+plotBear              = input.bool(true,  "Plot Bearish", inline="bear", group=group_divergences)
+plotHiddenBear        = input.bool(false, "Plot Hidden Bearish", inline="bear", group=group_divergences)
+delay_plot_til_closed = input.bool(true,  "Delay plot until candle is closed (don't repaint)", group=group_divergences)
+usex2LB               = input.bool(true,  "Lookback 2 Pivots?", group=group_divergences)
+lbR                   = input.int(1,      "Pivot Lookback Right", group=group_divergences)
+lbL                   = input.int(2,      "Pivot Lookback Left", group=group_divergences)
+rangeLower            = input.int(1,      "Min of Lookback Range", group=group_divergences)
+rangeUpper            = input.int(60,     "Max of Lookback Range", group=group_divergences)
+
+//______________________________________________________________________________
+// Elliott Wave Oscillator (EWO) Breaking Bands
+// https://www.tradingview.com/script/UcBJKm4O/
+//______________________________________________________________________________
+src_ewo = get_src(SRC)
+ewo1    = ma(type_fast, src_ewo, ma_fast) - ma(type_slow, src_ewo, ma_slow) 
+AvgEWO  = ta.ema(ewo1, Len)	
+
+UpperBand = ewo1
+UpperBand := nz(UpperBand[1])
+if ewo1 > 0
+    UpperBand := (UpperBand[1] + 0.0555*(ewo1 - UpperBand[1]))
+
+LowerBand = ewo1
+LowerBand := nz(LowerBand[1])
+if ewo1 < 0
+    LowerBand := (LowerBand[1] + 0.0555*(ewo1 - LowerBand[1]))
+
+red_orange = #FF4000
+chartreuse = #80FF00
+coral      = #FF8080
+lavender   = #8080FF
+
+color_in = ewo1 > LowerBand and ewo1 < 0 ? #7F4040 : ewo1 > 0 and ewo1 < UpperBand ? #40407F : na
+background = ewo1 > 0 ? color.new(#00FFFF, 85) : color.new(#FF0000, 85)  
+
+color_ewo  = ewo1 > UpperBand ? lavender : ewo1  < LowerBand ? coral : color_in
+plot(show_EWO ? ewo1 : na, title="EWO", color = color_ewo, style = plot.style_columns)
+
+color_sig = AvgEWO > 0 ?  chartreuse : red_orange
+plot(show_EWO and signal_ewo ? AvgEWO : na, title = "Signal(EWO)", color = color_sig, linewidth = 2)
+
+plot(show_EWO and show_bands ? UpperBand : na,	title = "Upper Band", color = #EFEFBF)
+plot(show_EWO and show_bands ? LowerBand : na,	title = "Lower Band", color = #EFEFBF)
+bgcolor(bg_EWO ? background : na, title = "Background EWO")
+
+//_________________________________________________________________________________
+// Based on "Squeeze Momentum Indicator" - Author:@LazyBear and @J-Streak          
+// https://www.tradingview.com/script/nqQ1DT5a-Squeeze-Momentum-Indicator-LazyBear/
+// https://www.tradingview.com/script/557GijRq-JS-Squeeze-Pro-2/                   
+//_________________________________________________________________________________
+// Bollinger Bands Basis Line
+basis = ma(bbmatype, src, length) 
+
+// Keltner Channel Basis Line
+basiskc = ma(kcmatype, src, length)
+// Keltner Channel Range
+range_src = useTR ? ta.tr : (high - low)
+range_kc  = ma(kcmatype, range_src, length)
+// Keltner Channel Low Multiplier
+multlowKC = 2.0
+// Keltner Channel Mid Multiplier
+multmidKC = 1.5
+// Keltner Channel High Multiplier
+multhighKC = 1.0
+
+// Bollinger Bands 
+dev         = multBB * ta.stdev(src, length)
+upperBB     = basis + dev
+lowerBB     = basis - dev
+// Keltner Channel Bands Low 
+upperKCl    = basiskc + range_kc * multlowKC
+lowerKCl    = basiskc - range_kc * multlowKC
+// Keltner Channel Bands Mid
+upperKCm    = basiskc + range_kc * multmidKC
+lowerKCm    = basiskc - range_kc * multmidKC
+// Keltner Channel Bands High
+upperKCh    = basiskc + range_kc * multhighKC
+lowerKCh    = basiskc - range_kc * multhighKC
+
+//------------------------{ Squeeze Momentum Basics }------------------------------------
+// Momentum
+ma_momentum = ma(typeMom, srcM, lengthM)
+sz = ta.linreg(srcM - math.avg(math.avg(ta.highest(high, lengthM), ta.lowest(low, lengthM)), ma_momentum), lengthM, 0)
+
+// Momentum Conditions
+sc1 = sz >= 0
+sc2 = sz < 0
+sc3 = sz >= sz[1]
+sc4 = sz < sz[1]
+
+// Squeeze On
+lowsqz      = lowerBB > lowerKCl and upperBB < upperKCl
+lsf         = lowsqz == false
+midsqz      = lowerBB > lowerKCm and upperBB < upperKCm
+msf         = midsqz == false
+highsqz     = lowerBB > lowerKCh and upperBB < upperKCh
+hsf         = highsqz == false
+
+//-----------------------{ Color Components }-----------------------------------
+// Color Conditions
+clr1        = sc1 and sc3 ? #00EEFF : 
+   sc1 and sc4 ? #000EFF : sc2 and sc4 ? #FF0000 : sc2 and sc3 ? #FFE500 : color.gray
+clr2        = sc1 and sc3 ? #00bcd4 : 
+   sc1 and sc4 ? #0D47A1 : sc2 and sc4 ? #BA68C8 : sc2 and sc3 ? #9C27B0 : #673AB7
+clr3        = sc1 and sc3 ? #15FF00 : sc1 and sc4 ? #388E3C : 
+   sc2 and sc4 ? #F44336 : sc2 and sc3 ? #B71C1C : color.gray
+clr4        = sc1 and sc3 ? #fff59d : 
+   sc1 and sc4 ? #FFD600 : sc2 and sc4 ? #FFCC80 : sc2 and sc3 ? #FF9800 : #702700
+clr5        = sc1 and sc3 ? #2196F3 : 
+   sc1 and sc4 ? #0D47A1 : sc2 and sc4 ? #EF9A9A : sc2 and sc3 ? #D32F2F : #CE93D8
+choice      = color_M == 1 ? clr1 : color_M == 2 ? clr2 : 
+   color_M == 3 ? clr3 : color_M == 4 ? clr4 : color_M == 5 ? clr5 : na
+
+//-----------------{ Indicator Components and Plots }---------------------------
+// Squeeze Dot Colors
+orange_red     = #FF4000 // Original Squeeze 
+golden_yellow  = #FFE500 // High Squeeze
+sqzproc  = highsqz ? golden_yellow : midsqz ? orange_red : lowsqz ? color.gray : na
+// Squeeze Dot Plot Above 
+sqzpro      = zeroSQZ ? na : highsqz ? highsqz : midsqz ? midsqz : lowsqz ? lowsqz : na
+plotshape(show_sqz ? sqzpro : na, title="Squeeze Dots Top", style=shape.circle, location=location.top, color=sqzproc)
+
+// Momentum Plot
+plot(show_Momen ? sz : na, title="Squeeze Momentum", color=choice, style=plot.style_columns)
+
+// Plot Zero Line
+color_zero =  highsqz ? golden_yellow : midsqz ? orange_red : lowsqz ? color.gray : clr3
+plot(zeroSQZ ? 0 : na, title="Squeeze Zero Line", color=color_zero, linewidth=2, style=plot.style_circles)
+
+// Background Conditions
+bg1_dark = color.new(color.gray, 95)
+bg2_dark = color.new(#673AB7, 95)
+bg3_dark = color.new(color.gray, 95)
+bg4_dark = color.new(#FFD600, 95)
+bg5_dark = color.new(#CE93D8, 95)
+
+bgc_dark = bgoff ? na : color_M == 1 ? bg1_dark : color_M == 2 ? bg2_dark : 
+   color_M == 3 ? bg3_dark : color_M == 4 ? bg4_dark : color_M == 5 ? bg5_dark : na
+
+clr1_bg        = sc1 and sc3 ? color.new(#00EEFF, 80) : 
+   sc1 and sc4 ? color.new(#000EFF, 80) : sc2 and sc4 ? color.new(#FF0000, 80) : sc2 and sc3 ? color.new(#FFE500, 80) : color.new(color.gray, 80)
+clr2_bg        = sc1 and sc3 ? color.new(#00bcd4, 80) : 
+   sc1 and sc4 ? color.new(#0D47A1, 80) : sc2 and sc4 ? color.new(#BA68C8, 80) : sc2 and sc3 ? color.new(#9C27B0, 80) : color.new(#673AB7, 80)
+clr3_bg        = sc1 and sc3 ? color.new(#15FF00, 80) : sc1 and sc4 ? color.new(#388E3C, 80) : 
+   sc2 and sc4 ? color.new(#F44336, 80) : sc2 and sc3 ? color.new(#B71C1C, 80) : color.new(color.gray, 80)
+clr4_bg        = sc1 and sc3 ? color.new(#fff59d, 80) : 
+   sc1 and sc4 ? color.new(#FFD600, 80) : sc2 and sc4 ? color.new(#FFCC80, 80) : sc2 and sc3 ? color.new(#FF9800, 80) : color.new(#702700, 80)
+clr5_bg        = sc1 and sc3 ? color.new(#2196F3, 80) : 
+   sc1 and sc4 ? color.new(#0D47A1, 80) : sc2 and sc4 ? color.new(#EF9A9A, 80) : sc2 and sc3 ? color.new(#D32F2F, 80) : color.new(#CE93D8, 80)
+choice_bg      = color_M == 1 ? clr1_bg : color_M == 2 ? clr2_bg : 
+   color_M == 3 ? clr3_bg : color_M == 4 ? clr4_bg : color_M == 5 ? clr5_bg : na
+
+// Background Colors
+bgcolor(darkm ? bgc_dark : na, title = "Gray Background", editable=false)
+bgcolor(bgoff ? na       : choice_bg, title = "Momentum Background")
+
+//___________________________________________________________________________________________
+// Based on "Better Divergence On Any Indicator" - Author: @DoctaBot
+// https://www.tradingview.com/script/tbrsp75I-Better-Divergence-On-Any-Indicator-DoctaBot/
+//___________________________________________________________________________________________
+osc             = show_Momen and drdiv ? sz : show_EWO and diver_EWO ? ewo1 : na
+bearColor       = color.new(color.red, 0)
+bullColor       = color.new(color.lime, 0)
+hiddenBullColor = color.new(#00945F, 15)
+hiddenBearColor = color.new(#990040, 15)
+textColor       = color.new(color.white, 0)
+textColor2      = color.new(color.black, 0)
+
+repaint = (not(delay_plot_til_closed) or barstate.ishistory or barstate.isconfirmed)
+
+plFound = na(ta.pivotlow(osc, lbL, lbR))  ? false : true
+phFound = na(ta.pivothigh(osc, lbL, lbR)) ? false : true
+
+_inRange(cond, occurence) =>
+	bars = (bar_index - ta.valuewhen(cond, bar_index, occurence))
+	rangeLower <= bars and bars <= rangeUpper
+	
+oscPLCur    = ta.valuewhen(plFound, osc[lbR], 0)                    //Current Oscillator Pivot Low
+oscPL1      = ta.valuewhen(plFound, osc[lbR], 1)                    //Last Oscillator Pivot Low
+oscPL2      = ta.valuewhen(plFound, osc[lbR], 2)                    //2 Back Oscillator Pivot Low
+
+oscPLCurBar = ta.valuewhen(plFound, bar_index - lbR, 0)             //Current Oscillator Pivot Low Bar Index
+oscPL1Bar   = ta.valuewhen(plFound, bar_index - lbR, 1)             //Last Oscillator Pivot Low Bar Index
+oscPL2Bar   = ta.valuewhen(plFound, bar_index - lbR, 2)             //2 Back Oscillator Pivot Low Bar Index
+
+oscPHCur    = ta.valuewhen(phFound, osc[lbR], 0)                    //Current Oscillator Pivot High
+oscPH1      = ta.valuewhen(phFound, osc[lbR], 1)                    //Last Oscillator Pivot High
+oscPH2      = ta.valuewhen(phFound, osc[lbR], 2)                    //2 Back Oscillator Pivot High
+
+oscPHCurBar = ta.valuewhen(phFound, bar_index - lbR, 0)             //Current Oscillator Pivot High Bar Index
+oscPH1Bar   = ta.valuewhen(phFound, bar_index - lbR, 1)             //Last Oscillator Pivot High Bar Index
+oscPH2Bar   = ta.valuewhen(phFound, bar_index - lbR, 2)             //2 Back Oscillator Pivot High Bar Index
+
+oscPL2Slope = (osc[lbR] - oscPL2)/((bar_index - lbR) - oscPL2Bar)   //Slope Between Pivot Lows
+oscPL2Lim   = ((oscPL1Bar - oscPL2Bar)*(oscPL2Slope)) + oscPL2      //Pivot Low Oscillator Intersect Limit
+
+oscPH2Slope = (osc[lbR] - oscPH2)/((bar_index - lbR) - oscPH2Bar)   //Slope Between Pivot Highs
+oscPH2Lim   = ((oscPH1Bar - oscPH2Bar)*(oscPH2Slope)) + oscPH2      //Pivot High Oscillator Intersect Limit
+
+// Oscilator Pivots
+oscHL1 = (osc[lbR] > oscPL1 and _inRange(plFound, 1))                           //Osc. Higher Low compared to previous
+oscHL2 = (osc[lbR] > oscPL2 and _inRange(plFound, 2) and oscPL1 > oscPL2Lim)    //Osc. Higher Low compared to 2 back with no intersection
+     
+oscLL1 = (osc[lbR] < oscPL1 and _inRange(plFound, 1))                           //Osc. Lower Low compared to previous
+oscLL2 = (osc[lbR] < oscPL2 and _inRange(plFound, 2) and oscPL1 > oscPL2Lim)    //Osc. Lower Low compared to 2 back with no intersection
+        
+oscLH1 = (osc[lbR] < oscPH1 and _inRange(phFound, 1))                           //Osc. Lower High compared to previous
+oscLH2 = (osc[lbR] < oscPH2 and _inRange(phFound, 2) and oscPH1 < oscPH2Lim)    //Osc. Lower High compared to 2 back with no intersection
+        
+oscHH1 = (osc[lbR] > oscPH1 and _inRange(phFound, 1))                           //Osc. Higher High compared to previous
+oscHH2 = (osc[lbR] > oscPH2 and _inRange(phFound, 2) and oscPH1 < oscPH2Lim)    //Osc. Higher High compared to 2 back with no intersection
+
+// Price Pivots
+priceLL1 = ta.lowest(close, lbR + 2) < ta.valuewhen(plFound, ta.lowest(close, lbR + 2), 1)      //Price Lower Low compared to previous
+priceLL2 = ta.lowest(close, lbR + 2) < ta.valuewhen(plFound, ta.lowest(close, lbR + 2), 2)      //Price Lower Low compared to 2 back
+
+priceHL1 = ta.lowest(close, lbR + 2) > ta.valuewhen(plFound, ta.lowest(close, lbR + 2), 1)      //Price Higher Low compared to previous
+priceHL2 = ta.lowest(close, lbR + 2) > ta.valuewhen(plFound, ta.lowest(close, lbR + 2), 2)      //Price Higher Low compared to 2 back
+
+priceHH1 = ta.highest(close, lbR + 2) > ta.valuewhen(phFound, ta.highest(close, lbR + 2), 1)    //Price Higher High compared to previous
+priceHH2 = ta.highest(close, lbR + 2) > ta.valuewhen(phFound, ta.highest(close, lbR + 2), 2)    //Price Higher High compared to 2 back
+
+priceLH1 = ta.highest(close, lbR + 2) < ta.valuewhen(phFound, ta.highest(close, lbR + 2), 1)    //Price Lower High compared to previous
+priceLH2 = ta.highest(close, lbR + 2) < ta.valuewhen(phFound, ta.highest(close, lbR + 2), 2)    //Price Lower High compared to 2 back
+
+// Conditions
+bullCond1       = plotBull          and plFound and repaint and (priceLL1 and oscHL1) and osc < 0
+bullCond2       = plotBull          and plFound and repaint and (usex2LB ? (priceLL2 and oscHL2) : false) and osc < 0
+
+hiddenBullCond1 = plotHiddenBull    and plFound and repaint and (priceHL1 and oscLL1) and osc < 0
+hiddenBullCond2 = plotHiddenBull    and plFound and repaint and (usex2LB ? (priceHL2 and oscLL2) : false) and osc < 0
+
+bearCond1       = plotBear          and phFound and repaint and (priceHH1 and oscLH1) and osc > 0
+bearCond2       = plotBear          and phFound and repaint and (usex2LB ? (priceHH2 and oscLH2) : false) and osc > 0
+
+hiddenBearCond1 = plotHiddenBear    and phFound and repaint and (priceLH1 and oscHH1) and osc > 0
+hiddenBearCond2 = plotHiddenBear    and phFound and repaint and (usex2LB ? (priceLH2 and oscHH2) : false) and osc > 0
+
+f_drawLine(_x1, _x2, _y1, _y2, _color, _width) =>
+    line.new(
+     x1     = _x1,
+     x2     = _x2,
+     y1     = _y1,
+     y2     = _y2,
+     color  = _color,
+     width  = _width,
+     xloc   = xloc.bar_index
+     )
+    
+// Plot Bull Lines
+if plFound
+    f_drawLine(
+     bullCond1 or hiddenBullCond1 ? oscPL1Bar : bullCond2 or hiddenBullCond2 ? oscPL2Bar : oscPLCurBar, 
+     oscPLCurBar, 
+     bullCond1 or hiddenBullCond1 ? oscPL1 : bullCond2 or hiddenBullCond2 ? oscPL2 : oscPLCur, 
+     oscPLCur, 
+     bullCond1 or bullCond2 ? bullColor : hiddenBullColor, 
+     2)
+
+// Plot Bear Lines
+if phFound
+    f_drawLine(
+     bearCond1 or hiddenBearCond1 ? oscPH1Bar : bearCond2 or hiddenBearCond2 ? oscPH2Bar : oscPHCurBar, 
+     oscPHCurBar, 
+     bearCond1 or hiddenBearCond1 ? oscPH1 : bearCond2 or hiddenBearCond2 ? oscPH2 : oscPHCur, 
+     oscPHCur, 
+     bearCond1 or bearCond2 ? bearColor : hiddenBearColor, 
+     2)
+     
+// Plot Bull Labels
+plotshape(
+	 bullCond1 or bullCond2 ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bullish Label",
+	 text=" R ",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor2
+	 )
+
+// Plot Hidden Bull Labels
+plotshape(
+	 hiddenBullCond1 or hiddenBullCond2 ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bullish Label",
+	 text=" H ",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=hiddenBullColor,
+	 textcolor=textColor
+	 )
+
+// Plot Bear Labels
+plotshape(
+	 bearCond1 or bearCond2 ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Regular Bearish Label",
+	 text=" R ",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+// Plot Hidden Bear Labels
+plotshape(
+	 hiddenBearCond1 or hiddenBearCond2 ? osc[lbR] : na,
+	 offset=-lbR,
+	 title="Hidden Bearish Label",
+	 text=" H ",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=hiddenBearColor,
+	 textcolor=textColor
+	 )
+
+// Alerts
+if bullCond1 or bullCond2
+    alert("Regular Bull Divergence", alert.freq_once_per_bar_close )
+
+if hiddenBullCond1 or hiddenBullCond2
+    alert("Hidden Bull Divergence", alert.freq_once_per_bar_close )
+    
+if bearCond1 or bearCond2
+    alert("Regular Bear Divergence", alert.freq_once_per_bar_close )
+    
+if hiddenBearCond1 or hiddenBearCond2
+    alert("Hidden Bear Divergence", alert.freq_once_per_bar_close )
+    
+alertcondition(bullCond1 or bullCond2,             title = "Regular Bull Divergence", message = "Regular Bull Divergence")
+alertcondition(hiddenBullCond1 or hiddenBullCond2, title = "Hidden Bull Divergence",  message = "Hidden Bull Divergence")
+alertcondition(bearCond1 or bearCond2,             title = "Regular Bear Divergence", message = "Regular Bear Divergence")
+alertcondition(hiddenBearCond1 or hiddenBearCond2, title = "Hidden Bear Divergence",  message = "Hidden Bear Divergence")
+
+//______________________________________________________________________________
+// Based on "Directional Movement Index and ADX"
+// https://www.tradingview.com/script/VroqhJmg/
+//______________________________________________________________________________
+[diplus, diminus, adxValue] = ta.dmi(dilen, adxlen)
+
+biggest(series) =>
+    max = 0.0
+    max := nz(max[1], series)
+    if series > max
+        max := series
+    max
+
+// Calculate ADX Scale
+ni = biggest(sz)
+adx_scale = (adxValue - keyLevel + distance) * ni/scale
+
+// J. Welles Wilder, developer of DMI, believed that a DMI reading above 25 indicated a strong trend, 
+// while a reading below 20 indicated a weak or non-existent trend.
+dmiBull = diplus   >= diminus  and adxValue >= keyLevel
+dmiBear = diplus   <  diminus  and adxValue >= keyLevel
+dmiWeak = adxValue <  keyLevel and adxValue >  weakTrend
+
+// Colored Directional Movement Index (CDMI) by @dgtrd and modified by @OskarGallard
+slope_positive = adxValue > adxValue[1]
+diCross = bar_index - ta.valuewhen(ta.cross(diplus, diminus), bar_index, 0)
+strong = slope_positive ? "Strong" : " "
+weak_up_dn = dmiWeak ? (diplus   >= diminus ? "[uptrend]" : "[downtrend]") : ""
+
+dmiColor = dmiBull ? (slope_positive ? #006400     : color.green) : 
+           dmiBear ? (slope_positive ? #910000     : color.red) : 
+           dmiWeak ? (slope_positive ? color.black : color.gray) : 
+           (slope_positive ? #DAA80A : #FFC40C)  
+ 
+color_ADX = slope_positive ? pos : neg
+plot(show_ADX ? adx_scale : na, color = color_ADX, title = "ADX", linewidth = 2)
+plot(zeroSQZ ? na : (show_ADX ? distance* ni/scale : na), color = keyColor ? dmiColor : color_ADX, title = "Key Level", linewidth = 1, style = plot.style_line)
+
+// Label
+lbStat  = histLabel > 0 ? "\n\n Timeframe: " + timeframe.period + ", " + str.tostring(histLabel) + " bar(s) earlier historical value.-": 
+          "\n\n Timeframe: " + timeframe.period + ", last di cross " + str.tostring(diCross) + " bar(s) before.-"
+
+adxMom  = slope_positive ? " ▲ Growing | Previous ADX: " + str.tostring(adxValue[1], "#.##") + ")\n» " : " ▼ Falling | Previous ADX(" + str.tostring(adxValue[1], "#.##") + ")\n» "
+
+diStat  = diplus >= diminus ? "diPlus(" + str.tostring(diplus, "#.##") + ") >= diMinus(" + str.tostring(diminus, "#.##") + ")" :
+          "diPlus(" + str.tostring(diplus, "#.##") + ") < diMinus(" + str.tostring(diminus, "#.##") + ")"
+
+dmiText = dmiBull ? strong + " Bullish\n» ADX(" + str.tostring(adxValue, "#.##") + ")" + adxMom + diStat: 
+          dmiBear ? strong + " Bearish\n» ADX(" + str.tostring(adxValue, "#.##") + ")" + adxMom + diStat:
+          dmiWeak ? "Weak " + weak_up_dn + "\n» ADX(" + str.tostring(adxValue, "#.##") + ")" + adxMom + diStat:
+          "No Trend\n» ADX(" + str.tostring(adxValue, "#.##") + ")" + adxMom + diStat
+
+oneDay = 24 * 60 * 60 * 1000
+barsAhead = 3
+onward = if timeframe.ismonthly
+    barsAhead * oneDay * 30
+else if timeframe.isweekly
+    barsAhead * oneDay * 7
+else if timeframe.isdaily
+    barsAhead * oneDay
+else if timeframe.isminutes
+    barsAhead * oneDay * timeframe.multiplier / 1440
+else if timeframe.isseconds
+    barsAhead * oneDay * timeframe.multiplier / 86400
+else
+    0
+
+// Colored DMI
+plotshape(show_DMI and diplus >= diminus, " +DI > -DI", shape.triangleup,   location.bottom, dmiColor)
+plotshape(show_DMI and diplus <  diminus, " +DI < -DI", shape.triangledown, location.bottom, dmiColor)
+
+alert_dmiBull = detect_bull_dmi and diplus >= diminus and ta.crossover(adxValue, keyLevel)
+alert_dmiBear = detect_bear_dmi and diplus < diminus  and ta.crossover(adxValue, keyLevel)
+
+if alert_dmiBull
+    alert('Symbol = (' + syminfo.tickerid + ') \n TimeFrame = (' + timeframe.period + ') \n Current Price (' + str.tostring(close) + ') \n Bullish Trend [DMI].', alert.freq_once_per_bar_close)
+
+if alert_dmiBear
+    alert('Symbol = (' + syminfo.tickerid + ') \n TimeFrame = (' + timeframe.period + ') \n Current Price (' + str.tostring(close) + ') \n Bearish Trend [DMI].', alert.freq_once_per_bar_close)
+
+// Label
+if not hideLabel
+    label dmiLabel = label.new(time, 0, text="DMI reading: " + dmiText[histLabel] + lbStat
+         ,tooltip="                 ◁ how to read colored dmi ▷\n* triangle shapes:\n  ▲- bullish : diplus >= diminus\n  ▼- bearish : diplus < diminus\n* colors:\n  green - bullish trend : adx >= keyLevel and di+ > di-\n  red - bearish trend : adx >= keyLevel and di+ < di- \n  gray - weak trend : weekTrend < adx < keyLevel\n  yellow - no trend : adx < weekTrend\n* color density:\n  darker : adx growing\n  lighter : adx falling "
+         ,color=dmiColor[histLabel], xloc=xloc.bar_time, style=label.style_label_left, textcolor=adxValue[histLabel] < weakTrend ? color.black : color.white, textalign=text.align_left)
+    label.set_x(dmiLabel, label.get_x(dmiLabel) + onward)
+    label.delete(dmiLabel[1])
+
+//_____________________________________________________________________________________
+// Hull Moving Average
+//_____________________________________________________________________________________
+// EHMA    
+EHMA(_src, _length) =>  ta.ema((2 * ta.ema(_src, _length / 2)) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+// THMA    
+THMA(_src, _length) =>  ta.wma(ta.wma(_src, _length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+// Adaptive HMA 
+AHMA(_src, _length) => ta.wma(2 * ta.wma(_src, _length / 2) - ta.wma(_src, _length), math.floor(math.sqrt(_length))) 
+
+// Hull type
+hull_type(type, src, len) =>
+    type == "HMA"  ? ta.hma(src, len) : type == "EHMA" ? EHMA(src, len) : type == "THMA" ? THMA(src, len/2) : AHMA(src, len)
+
+xHMA = hull_type(h_type, get_src(h_src), h_Length)
+longHMA  = ta.crossover(xHMA[0], xHMA[2])
+shortHMA = ta.crossunder(xHMA[0], xHMA[2])
+hull_color = xHMA[0] > xHMA[2] ? color.new(#45CEA2, 85) : color.new(#CE4571, 85)
+bgcolor(bg_Hull ? hull_color : na, title = "Hull Background")
+plotshape(show_Hull and longHMA,  title="Long Cross",  color=color.new(#45CEA2, 10), style=shape.triangleup,   location=location.bottom, size=size.tiny, text='H')
+plotshape(show_Hull and shortHMA, title="Short Cross", color=color.new(#CE4571, 10), style=shape.triangledown, location=location.top,    size=size.tiny, text='H')
+
+//______________________________________________________________________________
+// The Expert Trend Locator - XTL 
+//______________________________________________________________________________
+media  = ma(MA_Type2, get_src(src_xtl), period_xtl)
+cciNT = (get_src(src_xtl) - media) / (0.015 * ta.dev(get_src(src_xtl), period_xtl))
+cciT  = (get_src(src_xtl) - media) / (0.015 * ta.dev(math.abs(get_src(src_xtl) - media), period_xtl))
+values = uTrad ? cciT : cciNT
+
+var color color_XTL = na
+if (values < -fixed_Value) 
+    color_XTL := color_xtlDN // Bear
+if (-fixed_Value <= values and values <= fixed_Value)
+    color_XTL := color_xtlNe // Neutral
+if (values > fixed_Value)
+    color_XTL := color_xtlUP // Bull
+barcolor(candles_XTL ? color_XTL : na, title="XTL", editable=false) 
+
+//_____________________________________________________________________________________
+// Based on "Williams_Vix_Fix_V3_Upper_Text_Plots" - Author: @ChrisMoody
+// https://www.tradingview.com/script/1ffumXy5-CM-Williams-Vix-Fix-V3-Upper-Text-Plots/
+// https://www.ireallytrade.com/newsletters/VIXFix.pdf
+//_____________________________________________________________________________________
+// Williams Vix Fix Formula
+wvf       = ((ta.highest(close, pd)-low)/(ta.highest(close, pd)))*100
+sDev      = mult * ta.stdev(wvf, bbl)
+midLine   = ta.sma(wvf, bbl) 
+lowerBand = midLine - sDev
+upperBand = midLine + sDev
+rangeHigh = (ta.highest(wvf, lb)) * ph
+
+// Filtered Criteria
+upRange      = low > low[1] and close > high[1]
+upRange_Aggr = close > close[1] and close > open[1]
+// Filtered Criteria
+filtered      = ((wvf[1] >= upperBand[1] or wvf[1] >= rangeHigh[1]) and (wvf < upperBand and wvf < rangeHigh))
+filtered_Aggr = (wvf[1] >= upperBand[1] or wvf[1] >= rangeHigh[1]) and not (wvf < upperBand and wvf < rangeHigh)
+
+// Alerts Criteria
+alert1  = wvf >= upperBand or wvf >= rangeHigh ? 1 : 0
+alert2  = (wvf[1] >= upperBand[1] or wvf[1] >= rangeHigh[1]) and wvf < upperBand and wvf < rangeHigh ? 1 : 0
+cond_FE = upRange and close > close[str] and (close < close[ltLB] or close < close[mtLB]) and filtered 
+alert3  = cond_FE ? 1 : 0
+cond_AE = upRange_Aggr and close > close[str] and (close < close[ltLB] or close < close[mtLB]) and filtered_Aggr
+alert4  = cond_AE ? 1 : 0
+
+plotshape(sbcc and  alert1 ? alert1 : na,   "WVF Is True", color=color.new(#80FF00, 60), style=shape.triangledown, location=location.bottom, size=size.tiny)
+plotshape(sbc  and  alert2 ? alert2 : na,   "WVF Was True - Now False", color=color.new(#008080, 60), style=shape.triangledown, location=location.bottom, size=size.tiny)
+plotshape(sbcAggr and alert4 ? alert4 : na, "Aggressive Entry", color=color.new(#80FF00, 20), style=shape.triangleup, location=location.bottom, size=size.tiny, text='AE')
+plotshape(sbcFilt and alert3 ? alert3 : na, "Filtered Entry", color=color.new(#80FF00, 20), style=shape.triangleup, location=location.bottom, size=size.tiny, text='FE')
+
+if alert_AE and cond_AE
+    alert('Symbol = (' + syminfo.tickerid + ') \n TimeFrame = (' + timeframe.period + ') \n Current Price (' + str.tostring(close) + ') \n Aggressive Entry [VixFix].', alert.freq_once_per_bar_close)
+
+if alert_FE and cond_FE
+    alert('Symbol = (' + syminfo.tickerid + ') \n TimeFrame = (' + timeframe.period + ') \n Current Price (' + str.tostring(close) + ') \n Filtered Entry [VixFix].', alert.freq_once_per_bar_close)
+ 

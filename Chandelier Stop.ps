@@ -1,0 +1,100 @@
+//@version=4
+
+//Credits :
+//
+//1. LazyBear (Edited original VStop Script)
+//
+//2. pipCharlie
+// Script Name: Chandelier Stop
+// Link : https://in.tradingview.com/script/mjBdRGXe-Chandelier-Stop/
+//
+//
+// My Contribution :
+// Optimised the code inputs
+// Code Conversion to version 4
+// added feature for MTF based Trend Tracking
+
+study("[A618] Trend Tracker", overlay=true)
+
+
+//input variables
+Length=input(title="Look Back Period",  defval=10) 
+ATRPeriod=input(title="ATR Period",  defval=10) 
+Mult=input(title="ATR Multiplier",  defval=2) 
+
+// {Foreign Code}
+// pipCharlie's Code Start
+// Script Name: Chandelier Stop
+// Link : https://in.tradingview.com/script/mjBdRGXe-Chandelier-Stop/
+//calculate stop value
+short_stop = lowest(Length)+Mult*atr(ATRPeriod)
+long_stop  = highest(Length)-Mult*atr(ATRPeriod)
+
+shortvs = 0.0
+longvs = 0.0
+
+shortvs:=na(shortvs[1]) ? short_stop : iff(close>shortvs[1], short_stop , min(short_stop,shortvs[1]))
+longvs:=na(longvs[1]) ? long_stop : iff(close<longvs[1], long_stop, max(long_stop,longvs[1]))
+
+longswitch=iff (close>=shortvs[1] and close[1]<shortvs[1] , 1 ,  0)
+shortswitch=iff (close<=longvs[1] and close[1]>longvs[1] ,  1 ,  0)
+
+direction =0
+direction := iff(na(direction[1]), 0, iff (direction[1]<=0 and longswitch, 1, iff (direction[1]>=0 and shortswitch, -1, direction[1])))
+			
+pc=direction>0?longvs:shortvs
+
+// pipCharlie's Code End
+// Thanks pipCharlie for your amazing Contribution
+
+
+pc_plot = plot(pc, color=color.gray)
+
+//My part
+//REMODELLING THE Higher Time Frame Part
+// 
+//HTF part
+
+resolution = input(25)
+__0__ = input(true, "===== Resolution should be 5 times the current timeframe ====")
+
+short_stop_htf = security(  syminfo.tickerid, tostring(resolution), lowest(Length)+Mult*atr(ATRPeriod) )
+long_stop_htf  = security(  syminfo.tickerid, tostring(resolution), highest(Length)-Mult*atr(ATRPeriod) )
+
+shortvs_htf = 0.0
+longvs_htf = 0.0
+
+shortvs_htf :=na(shortvs_htf[1]) ? short_stop_htf : iff(close>shortvs_htf[1], short_stop_htf , min(short_stop_htf,shortvs_htf[1]))
+longvs_htf :=na(longvs_htf[1]) ? long_stop_htf : iff(close<longvs_htf[1], long_stop_htf, max(long_stop_htf,longvs_htf[1]))
+
+longswitch_htf=iff (close>=shortvs_htf[1] and close[1]<shortvs_htf[1] , 1 ,  0)
+shortswitch_htf=iff (close<=longvs_htf[1] and close[1]>longvs_htf[1] ,  1 ,  0)
+
+direction_htf =0
+direction_htf := iff(na(direction_htf[1]), 0, iff (direction_htf[1]<=0 and longswitch_htf, 1, iff (direction_htf[1]>=0 and shortswitch_htf, -1, direction_htf[1])))
+			
+pc_htf=direction_htf>0?longvs_htf:shortvs_htf
+
+pc_htf_plot = plot(pc_htf, color=color.gray)
+
+
+//condition for color
+color_cond = pc>pc_htf and close>pc ? color.green : pc<pc_htf and close<pc ? color.red : na
+fill(pc_plot, pc_htf_plot, color=color_cond)
+
+// Alert Conditions
+bull_entry_condition = (pc>pc_htf and close>pc) and not(pc[1]>pc_htf[1] and close[1]>pc[1])
+bear_entry_condition = (pc<pc_htf and close<pc) and not(pc[1]<pc_htf[1] and close[1]<pc[1])
+
+alertcondition(bull_entry_condition, title="potential bull entry", message="potential bull entry")
+alertcondition(bear_entry_condition, title="bpotential bear entry", message="potential bear entry")
+alertcondition(bear_entry_condition or bull_entry_condition, title="All Entry", message="All Entry")
+
+plotshape(bull_entry_condition, title='', text='↑\n↑\n↑\npotential Entry',
+          color=color.green, style=shape.arrowup, location=location.belowbar)
+
+plotshape(bear_entry_condition, title='', text='potential Entry\n↓\n↓\n↓',
+          color=color.red, style=shape.arrowup, location=location.abovebar)
+          
+
+

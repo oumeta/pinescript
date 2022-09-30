@@ -1,0 +1,103 @@
+ 
+//@version=5
+strategy("赵哥 alma ema srsi",
+
+         overlay=true,
+         initial_capital=10000,
+         process_orders_on_close=true,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100,
+         commission_type=strategy.commission.percent,
+         commission_value=0.1)
+
+timePeriod = time >= timestamp(syminfo.timezone, 2022, 9, 9, 0, 0)
+holding_p  = input.int(5,      'Holding Period |1..n|', minval=1)
+
+exittype   = input.string('Short','Exit Type',             options=['Short','Long','Both'])
+ 
+//alma fast and slow
+src = close
+var int  hp_counter = 0
+windowsize = input.int(title='Period', defval=9, group='Fast')
+windowsize2 = input.int(title='Period', defval=144, group='Slow')
+ 
+// offset = input.float(title="Offset",   defval=0.9, step=0.05)
+// sigma = input.float(title="Sigma",   defval=5)
+// outfast=ta.alma(src, windowsize, offset, sigma)
+// outslow=ta.alma(src, windowsize2, offset, sigma)
+f_dema(src,len)=>
+    e = ta.ema(src, len)
+    result = 2 * e - ta.ema(e, len)
+    result
+
+outfast=f_dema(src,windowsize)
+outslow=f_dema(src,windowsize2)
+
+
+eplot1 = plot(outslow, 'Slow Ema', color.red, 1,  plot.style_linebr)
+eplot2 = plot(outfast, 'Fast Ema', color.yellow, 1,  plot.style_linebr)
+
+atr1=ta.atr(1)
+atr10=ta.atr(10)
+//atr1line = plot(atr1+close, 'atr1', atr1>atr10?color.white:color.green, 1,  plot.style_linebr)
+//atr10line = plot(atr10+close, 'atr10', color.green, 1,  plot.style_linebr)
+ 
+var int BUY  =  1
+var int SELL = -1
+var int HOLD =  0
+var int  signal     = HOLD
+ 
+[pip, pim, adx] = ta.dmi(14, 14)
+
+signal :=  ta.crossover(outfast,outslow)   and timePeriod   ? BUY : ta.crossunder(outfast,outslow)    ? SELL : nz(signal[1])
+
+changed = ta.change(signal)
+
+hp_counter := changed ? 0 : hp_counter + 1
+
+ 
+// longex  = ta.crossunder(close, outslow) and (exittype != 'Short')
+// shortex = ta.crossover(close, outfast) and (exittype != 'Long')
+
+
+startLongTrade  = changed and signal==BUY
+startShortTrade = changed and signal==SELL
+endLongTrade    =   (changed and signal==SELL) or (signal==BUY  and hp_counter==holding_p and not changed)
+endShortTrade   =   (changed and signal==BUY)  or (signal==SELL and hp_counter==holding_p and not changed)
+// if changed and signal==BUY
+//     strategy.entry('Long', strategy.long)
+
+//         //alert(message=alertSyntaxBase + 'side:long', freq=alert.freq_once_per_bar_close)
+
+//     alert('Buy Alert', alert.freq_once_per_bar)  // alert.freq_once_per_bar_close
+
+atr1line = plot(atr10+close, 'atr1', signal==BUY?color.white:color.green, 1,  plot.style_linebr)
+
+if changed and signal==SELL
+    strategy.entry('Short', strategy.short)
+    alert('Sell Alert', alert.freq_once_per_bar)
+    
+    
+// if endLongTrade
+//     strategy.close('Long')
+if endShortTrade
+    strategy.close('Short')
+
+ 
+
+// atr=ta.atr(14)  
+    
+// Stop_L = strategy.position_avg_price -2*atr
+
+// Stop_S = strategy.position_avg_price +3*atr
+
+// Take_S= strategy.position_avg_price -2*atr
+
+// Take_L = strategy.position_avg_price +3*atr
+     
+// //Post Excecution
+// if strategy.position_size > 0
+//     strategy.exit("Flat", limit=Take_L, stop = Stop_L)
+
+// if strategy.position_size < 0
+//     strategy.exit("Flat", limit=Take_S, stop = Stop_S)

@@ -1,0 +1,50 @@
+//@version=5
+// This source code is subject to the terms of the Mozilla Public License 2.0 at mozilla.org/MPL/2.0/
+// ©Kocurek
+//
+// Open Source Works, thanks to @Pratik_4Clover for the Version5 Update (Image)
+// Shoutouts to @Siwan- and @Upland for the inspirations.
+//
+// Live a little, publish your scripts...be a John Elhers
+//
+
+indicator(title='obv-adx and DI, Ver5', shorttitle='obv-adx', format=format.price, precision=4)
+len = input.int(22, minval=1, title='DI Length')
+lensig = input.int(22, title='ADX Smoothing', minval=1, maxval=50)
+showADX1 = input(title='ADX Line or Histogram', defval=false)
+showADX2 = input(title='Background Highlighting', defval=false)
+
+//================ADX=========================
+up = ta.change(ta.obv)
+down = -ta.change(ta.obv)
+plusDM = na(up) ? na : up > down and up > 0 ? up : 0
+minusDM = na(down) ? na : down > up and down > 0 ? down : 0
+trur = ta.rma(ta.stdev(ta.obv, len), len)
+plus = fixnan(100 * ta.ema(plusDM, len) / trur)
+minus = fixnan(100 * ta.ema(minusDM, len) / trur)
+sum = plus + minus
+adx = 100 * ta.ema(math.abs(plus - minus) / (sum == 0 ? 1 : sum), lensig)
+
+diDiff = plus - minus
+
+//================Ploting True - ADX DMI=========================
+plot(showADX1 ? plus : na, color=color.new(color.blue, 0), title='+DI')
+plot(showADX1 ? minus : na, color=color.new(color.orange, 0), title='-DI')
+plot(showADX1 ? adx : na, color=color.new(color.red, 0), title='ADX')
+
+mygreen = plus >= 22 and minus <= 18 and adx >= 22
+myred = minus >= 22 and adx >= 22 and plus <= 18
+
+bgcolor(mygreen ? color.new(#00796b,(showADX2 ? 70 : 100)) : na, title='MyGreen')
+bgcolor(myred ? color.new(#880e4f,(showADX2 ? 70 : 100)) : na, title='MyRed')
+
+plotshape(ta.crossover(plus, minus) ? showADX1 ? (plus + minus) * 0.5 : na : na, location=location.absolute, style=shape.circle, color=color.new(color.green, 30), size=size.tiny, offset=0)
+plotshape(ta.crossover(minus, plus) ? showADX1 ? (plus + minus) * 0.5 : na : na, location=location.absolute, style=shape.circle, color=color.new(color.red, 30), size=size.tiny, offset=0)
+
+//================Ploting False - Histogram=========================
+diColor = plus - minus > 0 ? diDiff > diDiff[1] ? #45f248 : #C6FBC7 : diDiff < diDiff[1] ? #ff7878 : #FCCFCF
+plot(showADX1 ? na : diDiff + 50, style=plot.style_columns, color=color.new(diColor,47), histbase=50, title='DI Difference')
+
+// Plots divergences
+plotshape(mygreen ? showADX1 ? na : diDiff + 50 : na, location=location.absolute, style=shape.triangledown, color=color.new(color.red, 30), size=size.tiny, offset=0)
+plotshape(myred ? showADX1 ? na : diDiff + 50 : na, location=location.absolute, style=shape.triangleup, color=color.new(color.green, 30), size=size.tiny, offset=0)

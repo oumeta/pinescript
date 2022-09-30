@@ -1,0 +1,260 @@
+//@version=5
+
+//Arranged by Classic Scott
+
+//KDJ indicator using Jurik moving average.
+//Jurik Period would be similar to the Signal input in other versions of this indicator. Fine tune things with Phase and Power.
+
+//Includes:
+//Option to plot the average of K and D lines.
+//RSI overbought and oversold plots.
+//Candle coloring with the option to color candles based on either the 'J' line or the 'KD' line.
+//Plots for when crosses occur.
+//Alerts for things you might want to be alerted for.
+
+//credit to x4random for creating the version of the indicator this is iterating on.
+//credit to QuantTherapy and his "Jurik PPO" indicator for the JMA utilization.
+
+//Enjoy!
+
+
+indicator('+ JMA KDJ with RSI OB/OS Signals', shorttitle='+ KDJ')
+
+
+////CALCULATION INPUTS
+stoch_period = input.int(defval=21, title='Period', group='KDJ Inputs')
+
+source = input.source(defval=close, title='Jurik Source', group='KDJ Inputs')
+period = input.int(defval=4, title='Jurik Period', group='KDJ Inputs')
+phase = input.int(defval=10, title='Jurik Phase', group='KDJ Inputs')
+power = input.float(defval=0.6, step=0.1, title='Jurik Power', group='KDJ Inputs')
+
+kd_avg_plot = input.bool(defval=true, title='Check to Plot Average of K & D', group='KDJ Inputs')
+
+
+////JMA CALCULATION
+jurik(source, period, phase, power) =>
+    phaseRatio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+    beta = 0.45 * (period - 1) / (0.45 * (period - 1) + 2)
+    alpha = math.pow(beta, power)
+    jma = 0.0
+    e0 = 0.0
+    e0 := (1 - alpha) * source + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := (source - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    jma := e2 + nz(jma[1])
+    jma
+
+
+////KDJ CALCULATIONS
+hi = ta.highest(high, stoch_period)
+lo = ta.lowest(low, stoch_period)
+
+K = 100 * ((source - lo) / (hi - lo))
+pK = jurik(K, period, phase, power)
+pD = jurik(pK, period, phase, power)
+pJ = 3 * pK - 2 * pD
+pKD = math.avg(pK, pD)
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////KDJ COLORS & PLOTS
+i_kd_selection = input.string(defval='KD | Gradient', options=['KD | Gradient', 'KD | Center Line'], title='KD Color Selection', group='KDJ Color Inputs')
+i_j_selection = input.string(defval='J | Gradient', options=['J | Gradient', 'J | Center Line'], title='J Color Selection', group='KDJ Color Inputs')
+
+j_up = input.color(#ff9800, title='J +', group='KDJ Color Inputs')
+j_down = input.color(#2962ff, title='J -', group='KDJ Color Inputs')
+kd_up = input.color(#00bcd4, title='KD +', group='KDJ Color Inputs')
+kd_down = input.color(#e91e63, title='KD -', group='KDJ Color Inputs')
+
+kdj_c_1 = color.from_gradient(pJ, 0, 100, j_down, j_up)
+
+kdj_c_2 = pJ > 50 ? j_up : pJ < 50 ? j_down : na
+
+kdj_c_3 = color.from_gradient(pKD, 20, 80, kd_down, kd_up)
+
+kdj_c_4 = pKD > 50 ? kd_up : pKD < 50 ? kd_down : na
+
+kd_selection = i_kd_selection  == 'KD | Gradient' ? kdj_c_3 : i_kd_selection == 'KD | Center Line' ? kdj_c_4 :  na
+j_selection = i_j_selection == 'J | Gradient' ? kdj_c_1 : i_j_selection == 'J | Center Line' ? kdj_c_2 : na
+
+plot(not kd_avg_plot ? pK : na, color=kd_selection, title='K')
+plot(not kd_avg_plot ? pD : na, color=kd_selection, title='D')
+plot(kd_avg_plot ? pKD : na, color=kd_selection, title='KD Avg')
+plot(pJ, color=j_selection, title='J')
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////CANDLE COLOR & PLOTS FOR CROSSES
+i_candle_color = input.bool(defval=true, title='Colored Candles?', group='Candle Colors')
+i_cc_selection = input.string(defval='J | Gradient', options=['J | Gradient', 'J | Center Line', 'KD | Gradient', 'KD | Center Line'], title='Color Selection', group='Candle Colors')
+
+j_cc_up = input.color(#ff9800, title='J +', group='Candle Colors')
+j_cc_down = input.color(#2962ff, title='J -', group='Candle Colors')
+kd_cc_up = input.color(#00bcd4, title='KD +', group='Candle Colors')
+kd_cc_down = input.color(#e91e63, title='KD -', group='Candle Colors')
+
+cc_1 = color.from_gradient(pJ, 0, 100, j_cc_down, j_cc_up)
+
+cc_2 = pJ > 50 ? j_cc_up : pJ < 50 ? j_cc_down : na
+
+cc_3 = color.from_gradient(pKD, 20, 80, kd_cc_down, kd_cc_up)
+
+cc_4 = pKD > 50 ? kd_cc_up : pKD < 50 ? kd_cc_down : na
+
+cc_selection = i_cc_selection == 'J | Gradient' ? cc_1 : i_cc_selection == 'J | Center Line' ? cc_2 : i_cc_selection == 'KD | Gradient' ? cc_3 : i_cc_selection == 'KD | Center Line' ? cc_4 :  na
+
+barcolor(i_candle_color ? cc_selection : na, title='Colored Candles')
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////HORIZONTAL LINES & PLOTS FOR KDJ CROSSES
+h_ob = hline(100, linestyle=hline.style_dotted, color=#b2b5be, title='High')
+h_b = hline(75, linestyle=hline.style_dotted, color=#787b6a, title='Mid-High', display=display.none)
+h_median = hline(50, linestyle=hline.style_dotted, color=#b2b5be, title='Mid')
+h_s = hline(25, linestyle=hline.style_dotted, color=#787b6a, title='Mid-Low', display=display.none)
+h_os = hline(0, linestyle=hline.style_dotted, color=#b2b5be, title='Low')
+
+plotshape(ta.crossover(pJ, pKD), style=shape.triangleup, location=location.bottom, title='Cross Up', color=color.new(j_up, 0))
+plotshape(ta.crossunder(pJ, pKD), style=shape.triangledown, location=location.top, title='Cross Down', color=color.new(j_down, 0))
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////RSI
+rsi_source = input.source(defval=close, title='RSI Source', group='RSI')
+rsi_length = input.int(defval=14, title='RSI Period', group='RSI')
+rsi_color = input.color(color.fuchsia, title='RSI Signals', group='RSI')
+
+rsi = ta.rsi(rsi_source, rsi_length)
+
+plotshape(rsi > 70, style=shape.circle, location=location.top, title='RSI OB', color=rsi_color)
+plotshape(rsi < 30, style=shape.circle, location=location.bottom, title='RSI OS', color=rsi_color)
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////DIVERGENCES
+i_div_select = input.string(defval='J', options=['J', 'KD'], title='Source Select for Divergences', group='Divergences')
+div_select = i_div_select == 'J' ? pJ : i_div_select == 'KD' ? pKD : na
+
+lkbk_right = input.int(title='Pivot Lookback Right', defval=5, group='Divergences')
+lkbk_left = input.int(title='Pivot Lookback Left', defval=5, group='Divergences')
+max_range = input.int(title='Max of Lookback Range', defval=60, group='Divergences')
+min_range = input.int(title='Min of Lookback Range', defval=5, group='Divergences')
+plot_bull = input.bool(title='Bull', defval=true, group='Divergences')
+plot_hdn_bull = input.bool(title='Hidden Bull', defval=false, group='Divergences')
+plot_bear = input.bool(title='Bear', defval=true, group='Divergences')
+plot_hdn_bear = input.bool(title='Hidden Bear', defval=false, group='Divergences')
+
+////COLOR INPUTS
+c_bull = input.color(color.new(color.blue, 0), title='Bull', inline='bull div', group='Divergences')
+c_hdn_bull = input.color(color.new(color.yellow, 0), title='Hidden Bull', inline='bull div', group='Divergences')
+c_bear = input.color(color.new(color.red, 0), title='Bear', inline='bear div', group='Divergences')
+c_hdn_bear = input.color(color.new(color.fuchsia, 0), title='Hidden Bear', inline='bear div', group='Divergences')
+c_text = input.color(color.new(color.white, 0), title='Text  ', inline='text', group='Divergences')
+c_na = color.new(color.white, 100)
+
+
+
+pl_found = na(ta.pivotlow(div_select, lkbk_left, lkbk_right)) ? false : true
+
+ph_found = na(ta.pivothigh(div_select, lkbk_left, lkbk_right)) ? false : true
+
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    min_range <= bars and bars <= max_range
+
+
+////
+// Bullish
+// Osc: Higher Low
+
+osc_hl = div_select[lkbk_right] > ta.valuewhen(pl_found, div_select[lkbk_right], 1) and _inRange(pl_found[1])
+
+// Price: Lower Low
+
+price_ll = low[lkbk_right] < ta.valuewhen(pl_found, low[lkbk_right], 1)
+bull_cond = plot_bull and price_ll and osc_hl and pl_found
+
+plot(pl_found ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Bull', linewidth=1, color=bull_cond ? c_bull : c_na)
+
+plotshape(bull_cond ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Bullish Label', text=' Bull ', style=shape.labelup, location=location.absolute, color=c_bull, textcolor=c_text, display=display.none)
+
+
+////
+// Hidden Bullish
+// Osc: Lower Low
+
+osc_ll = div_select[lkbk_right] < ta.valuewhen(pl_found, div_select[lkbk_right], 1) and _inRange(pl_found[1])
+
+// Price: Higher Low
+
+price_hl = low[lkbk_right] > ta.valuewhen(pl_found, low[lkbk_right], 1)
+
+hdn_bull_cond = plot_hdn_bull and price_hl and osc_ll and pl_found
+
+plot(pl_found ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Hidden Bull', linewidth=1, color=hdn_bull_cond ? c_hdn_bull : c_na)
+
+plotshape(hdn_bull_cond ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Hidden Bullish Label', text=' H. Bull ', style=shape.labelup, location=location.absolute, color=c_bull, textcolor=c_text, display=display.none)
+
+
+////
+// Bearish
+// Osc: Lower High
+
+osc_lh = div_select[lkbk_right] < ta.valuewhen(ph_found, div_select[lkbk_right], 1) and _inRange(ph_found[1])
+
+// Price: Higher High
+
+price_hh = high[lkbk_right] > ta.valuewhen(ph_found, high[lkbk_right], 1)
+
+bear_cond = plot_bear and price_hh and osc_lh and ph_found
+
+plot(ph_found ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Bear', linewidth=1, color=bear_cond ? c_bear : c_na)
+
+plotshape(bear_cond ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Bearish Label', text=' Bear ', style=shape.labeldown, location=location.absolute, color=c_bear, textcolor=c_text, display=display.none)
+
+
+////
+// Hidden Bearish
+// Osc: Higher High
+
+osc_hh = div_select[lkbk_right] > ta.valuewhen(ph_found, div_select[lkbk_right], 1) and _inRange(ph_found[1])
+
+// Price: Lower High
+
+price_lh = high[lkbk_right] < ta.valuewhen(ph_found, high[lkbk_right], 1)
+
+hdn_bear_cond = plot_hdn_bear and price_lh and osc_hh and ph_found
+
+plot(ph_found ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Hidden Bear', linewidth=1, color=hdn_bear_cond ? c_hdn_bear : c_na)
+
+plotshape(hdn_bear_cond ? div_select[lkbk_right] : na, offset=-lkbk_right, title='Hidden Bearish Label', text=' H. Bear ', style=shape.labeldown, location=location.absolute, color=c_bear, textcolor=c_text, display=display.none)
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+////ALERT CONDITIONS
+alertcondition(pJ >= 100, title='J Overbought', message='+KDJ J line is overbought.')
+alertcondition(pJ <= 0, title='J Oversold', message='+KDJ J line is oversold.')
+alertcondition(ta.cross(pJ, 50), title='J Crossing Centerline', message='+KDJ J line has crossed the centerline.')
+alertcondition(ta.cross(pKD, 50), title='KD Crossing Centerline', message='+KDJ KD line has crossed the centerline.')
+alertcondition(ta.cross(pJ, pKD), title='J + KD Cross', message='+KDJ J & KD lines have crossed.')
+alertcondition(bull_cond, title='Bull Div', message='+ KDJ bull div')
+alertcondition(hdn_bull_cond, title='Hidden Bull Div', message='+ KDJ hidden bull div')
+alertcondition(bear_cond, title='Bear Div', message='+ KDJ bear div')
+alertcondition(hdn_bear_cond, title='Hidden Bear Div', message='+ KDJ hidden bear div')
+
+

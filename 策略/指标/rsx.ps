@@ -1,0 +1,389 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © KINSKI
+
+//@version=5
+indicator('KINSKI RSI/RSX Divergence', shorttitle='RSI/RSX Divergence', format=format.price, precision=2, timeframe='', timeframe_gaps=true, overlay=false)
+
+
+//************  Colors
+color valColorsGreen = #00FF11
+color valColorsGreenDark = #007007
+
+color valColorsGreenLight = #82FFC9
+color valColorsGreenLightDark = #498F70
+
+color valColorsRed = #FF0004
+color valColorsRedDark = #8A0002
+
+color valColorsAqua = #00EEFF
+color valColorsAquaDark = #00919C
+
+color valColorsPurple = #9900FF
+color valColorsPurpleDark = #590094
+
+color valColorsPink = #FF00D4
+color valColorsPinkDark = #910079
+
+color valColorsBearColor = color.red
+color valColorsBullColor = color.green
+
+color valColorsBearColorDark = valColorsRedDark
+color valColorsBullColorDark = valColorsGreenDark
+
+color valColorsTextColor = color.white
+color valColorsNaColor = color.new(color.white, 100)
+
+
+
+//********** Functions
+
+// Normalizes series with unknown min/max using historical min/max.
+// _src      : series to rescale.
+// _min, _min: min/max values of rescaled series.
+// Example: _funcNormalize(ta.sma(_src, _len), -50, 50)
+_funcNormalize(_src, _min, _max) =>
+    var _historicMin =  10e10
+    var _historicMax = -10e10
+    _historicMin := math.min(nz(_src, _historicMin), _historicMin)
+    _historicMax := math.max(nz(_src, _historicMax), _historicMax)
+    _min + (_max - _min) * (_src - _historicMin) / math.max(_historicMax - _historicMin, 10e-10)
+
+// Smoothed Moving Average (SMMA)
+_funcSMMA(_src, _len) =>
+    tmpSMA = ta.sma(_src, _len)
+    tmpVal = 0.0
+    tmpVal := na(tmpVal[1]) ? tmpSMA : (tmpVal[1] * (_len - 1) + _src) / _len
+    return_1 = tmpVal
+    return_1
+
+// Triple EMA (TEMA)
+_funcTEMA(_src, _len) =>
+    ema1 = ta.ema(_src, _len)
+    ema2 = ta.ema(ema1, _len)
+    ema3 = ta.ema(ema2, _len)
+    return_1 = 3 * (ema1 - ema2) + ema3
+    return_1
+
+// Double Expotential Moving Average (DEMA)
+_funcDEMA(_src, _len) =>
+    return_2 = 2 * ta.ema(_src, _len) - ta.ema(ta.ema(_src, _len), _len)
+    return_2
+
+// Hull Moving Average (HMA)
+_funcHMA(_src, _len) =>
+    tmpVal = math.max(2, _len)
+    return_3 = ta.wma(2 * ta.wma(_src, tmpVal / 2) - ta.wma(_src, tmpVal), math.round(math.sqrt(tmpVal)))
+    return_3
+
+// Exponential Hull Moving Average (EHMA)
+_funcEHMA(_src, _len) =>
+    tmpVal = math.max(2, _len)
+    return_4 = ta.ema(2 * ta.ema(_src, tmpVal / 2) - ta.ema(_src, tmpVal), math.round(math.sqrt(tmpVal)))
+    return_4
+
+// Kaufman's Adaptive Moving Average (KAMA)
+_funcKAMA(_src, _len) =>
+    tmpVal = 0.0
+    sum_1 = math.sum(math.abs(_src - _src[1]), _len)
+    sum_2 = math.sum(math.abs(_src - _src[1]), _len)
+    tmpVal := nz(tmpVal[1]) + math.pow((sum_1 != 0 ? math.abs(_src - _src[_len]) / sum_2 : 0) * (0.666 - 0.0645) + 0.0645, 2) * (_src - nz(tmpVal[1]))
+    return_5 = tmpVal
+    return_5
+
+// Variable Index Dynamic Average (VIDYA)
+_funcVIDYA(_src, _len) =>
+    _diff = ta.change(_src)
+    _uppperSum = math.sum(_diff > 0 ? math.abs(_diff) : 0, _len)
+    _lowerSum = math.sum(_diff < 0 ? math.abs(_diff) : 0, _len)
+    _chandeMomentumOscillator = (_uppperSum - _lowerSum) / (_uppperSum + _lowerSum)
+    _factor = 2 / (_len + 1)
+    tmpVal = 0.0
+    tmpVal := _src * _factor * math.abs(_chandeMomentumOscillator) + nz(tmpVal[1]) * (1 - _factor * math.abs(_chandeMomentumOscillator))
+    return_6 = tmpVal
+    return_6
+
+// Coefficient of Variation Weighted Moving Average (COVWMA)
+_funcCOVWMA(_src, _len) =>
+    _coefficientOfVariation = ta.stdev(_src, _len) / ta.sma(_src, _len)
+    _cw = _src * _coefficientOfVariation
+    tmpVal = math.sum(_cw, _len) / math.sum(_coefficientOfVariation, _len)
+    return_7 = tmpVal
+    return_7
+
+// Fractal Adaptive Moving Average (FRAMA)
+_funcFRAMA(_src, _len) =>
+    _coefficient = -4.6
+    _n3 = (ta.highest(high, _len) - ta.lowest(low, _len)) / _len
+    _hd2 = ta.highest(high, _len / 2)
+    _ld2 = ta.lowest(low, _len / 2)
+    _n2 = (_hd2 - _ld2) / (_len / 2)
+    _n1 = (_hd2[_len / 2] - _ld2[_len / 2]) / (_len / 2)
+    _dim = _n1 > 0 and _n2 > 0 and _n3 > 0 ? (math.log(_n1 + _n2) - math.log(_n3)) / math.log(2) : 0
+    _alpha = math.exp(_coefficient * (_dim - 1))
+    _sc = _alpha < 0.01 ? 0.01 : _alpha > 1 ? 1 : _alpha
+    tmpVal = _src
+    tmpVal := ta.cum(1) <= 2 * _len ? _src : _src * _sc + nz(tmpVal[1]) * (1 - _sc)
+    return_8 = tmpVal
+    return_8
+
+// Karobein
+_funcKarobein(_src, _len) =>
+    tmpMA = ta.ema(_src, _len)
+    tmpUpper  = ta.ema(tmpMA < tmpMA[1] ? tmpMA/tmpMA[1] : 0, _len)
+    tmpLower  = ta.ema(tmpMA > tmpMA[1] ? tmpMA/tmpMA[1] : 0, _len)
+    tmpRescaleResult  = (tmpMA/tmpMA[1]) / (tmpMA/tmpMA[1] + tmpLower)
+    (2*((tmpMA/tmpMA[1]) / (tmpMA/tmpMA[1] + tmpRescaleResult * tmpUpper)) - 1) * 100
+
+// calculate the moving average with the transferred settings
+_funcCalcMA(_type, _src, _len) =>
+    float ma = switch _type
+        "COVWMA" => _funcCOVWMA(_src, _len)
+        "DEMA" => _funcDEMA(_src, _len)
+        "EMA" => ta.ema(_src, _len)
+        "EHMA" => _funcEHMA(_src, _len)
+        "HMA" => _funcHMA(_src, _len)
+        "KAMA" => _funcKAMA(_src, _len)
+        "RMA" => ta.rma(_src, _len)
+        "SMA" => ta.sma(_src, _len)
+        "SMMA" => _funcSMMA(_src, _len)
+        "TEMA" => _funcTEMA(_src, _len)
+        "FRAMA" => _funcFRAMA(_src, _len)
+        "VWMA" => ta.vwma(_src, _len)
+        "VIDYA" => _funcVIDYA(_src, _len)
+        "WMA" => ta.wma(_src, _len)
+        "Karobein" => _funcKarobein(_src, _len)
+        =>
+            float(na)
+
+_funcCalcMaFinal(_type, _src, _len, _showBreakoutsOnOff, _obLevel, _osLevel, _colorDefault, _colorOverbought, _colorOversold) =>
+    tmpMA = _funcCalcMA(_type, _src, _len)
+    tmpColor = tmpMA > _obLevel ? _colorOverbought : tmpMA < _osLevel ? _colorOversold : _colorDefault
+    tmpColorFinal = _showBreakoutsOnOff ? tmpColor : _colorDefault
+    [tmpMA, tmpColorFinal]
+
+_funcRSI(_src, _len, _showBreakoutsOnOff, _obLevel, _osLevel, _colorDefault, _colorOverbought, _colorOversold, _smoothingType, _smoothingPeriod) =>
+    tmpVal = ta.rsi(_src, _len)
+    [tmpValAlternative,colorFinal] = _funcCalcMaFinal(_smoothingType, tmpVal, _smoothingPeriod, _showBreakoutsOnOff, _obLevel, _osLevel, _colorDefault, _colorOverbought, _colorOversold)
+    tmpRSI = _smoothingType != 'DISABLED' ? tmpValAlternative : tmpVal
+    tmpColor = tmpRSI > _obLevel ? _colorOverbought : tmpRSI < _osLevel ? _colorOversold : _colorDefault
+    tmpColorFinal = _showBreakoutsOnOff ? tmpColor : _colorDefault
+    [tmpRSI, tmpColorFinal]
+
+_funcRSX(_src, _len, _showBreakoutsOnOff, _obLevel, _osLevel, _colorDefault, _colorOverbought, _colorOversold, _smoothingType, _smoothingPeriod) =>
+    //---- Base script: RSX Divergence — SharkCIA by Jaggedsoft https://www.tradingview.com/script/ujh3sCzy-RSX-Divergence-SharkCIA/
+    f8 = 100 * _src
+    f10 = nz(f8[1])
+    v8 = f8 - f10
+
+    f18 = 3 / (_len + 2)
+    f20 = 1 - f18
+
+    f28 = 0.0
+    f28 := f20 * nz(f28[1]) + f18 * v8
+
+    f30 = 0.0
+    f30 := f18 * f28 + f20 * nz(f30[1])
+    vC = f28 * 1.5 - f30 * 0.5
+
+    f38 = 0.0
+    f38 := f20 * nz(f38[1]) + f18 * vC
+
+    f40 = 0.0
+    f40 := f18 * f38 + f20 * nz(f40[1])
+    v10 = f38 * 1.5 - f40 * 0.5
+
+    f48 = 0.0
+    f48 := f20 * nz(f48[1]) + f18 * v10
+
+    f50 = 0.0
+    f50 := f18 * f48 + f20 * nz(f50[1])
+    v14 = f48 * 1.5 - f50 * 0.5
+
+    f58 = 0.0
+    f58 := f20 * nz(f58[1]) + f18 * math.abs(v8)
+
+    f60 = 0.0
+    f60 := f18 * f58 + f20 * nz(f60[1])
+    v18 = f58 * 1.5 - f60 * 0.5
+
+    f68 = 0.0
+    f68 := f20 * nz(f68[1]) + f18 * v18
+
+    f70 = 0.0
+    f70 := f18 * f68 + f20 * nz(f70[1])
+    v1C = f68 * 1.5 - f70 * 0.5
+
+    f78 = 0.0
+    f78 := f20 * nz(f78[1]) + f18 * v1C
+
+    f80 = 0.0
+    f80 := f18 * f78 + f20 * nz(f80[1])
+    v20 = f78 * 1.5 - f80 * 0.5
+
+    f88_ = 0.0
+    f90_ = 0.0
+
+    f88 = 0.0
+    f90_ := nz(f90_[1]) == 0 ? 1 : nz(f88[1]) <= nz(f90_[1]) ? nz(f88[1]) + 1 : nz(f90_[1]) + 1
+    f88 := nz(f90_[1]) == 0 and _len - 1 >= 5 ? _len - 1 : 5
+
+    f0 = f88 >= f90_ and f8 != f10 ? 1 : 0
+    f90 = f88 == f90_ and f0 == 0 ? 0 : f90_
+
+    v4_ = f88 < f90 and v20 > 0 ? (v14 / v20 + 1) * 50 : 50
+
+    tmpVal = v4_ > 100 ? 100 : v4_ < 0 ? 0 : v4_
+    [tmpValAlternative,colorT] = _funcCalcMaFinal(_smoothingType, tmpVal, _smoothingPeriod, _showBreakoutsOnOff, _obLevel, _osLevel, _colorDefault, _colorOverbought, _colorOversold)
+    tmpRsx = _smoothingType != 'DISABLED' ? tmpValAlternative : tmpVal
+
+    tmpColor = tmpRsx > _obLevel ? _colorOverbought : tmpRsx < _osLevel ? _colorOversold : _colorDefault
+    tmpColorFinal = _showBreakoutsOnOff ? tmpColor : _colorDefault
+
+    [tmpRsx, tmpColorFinal]
+
+_funcRange(_cond, _minLookbackRange, _maxLookbackRange) =>
+    bars = ta.barssince(_cond == true)
+    _minLookbackRange <= bars and bars <= _maxLookbackRange
+
+_funcPivot(_src, _pivotLookbackLeft, _pivotLookbackRight, _pivotLookbackRangeMin, _pivotLookbackRangeMax) =>
+    // Pivot
+    tmpPivotLowFound = na(ta.pivotlow(_src, _pivotLookbackLeft, _pivotLookbackRight)) ? false : true
+    tmpPivotHighFound = na(ta.pivothigh(_src, _pivotLookbackLeft, _pivotLookbackRight)) ? false : true
+
+    // Regular Bullish
+    // Oscillator Higher Low
+    tmpOscillatorHigherLow = _src[_pivotLookbackRight] > ta.valuewhen(tmpPivotLowFound, _src[_pivotLookbackRight], 1) and _funcRange(tmpPivotLowFound[1], _pivotLookbackRangeMin, _pivotLookbackRangeMax)
+    // Price: Lower Low
+    tmpPriceLowerLow = low[_pivotLookbackRight] < ta.valuewhen(tmpPivotLowFound, low[_pivotLookbackRight], 1)
+    tmpBullishCondition = tmpPriceLowerLow and tmpOscillatorHigherLow and tmpPivotLowFound
+
+    // Regular Bearish
+    // Oscillator Lower High
+    tmpOscillatorLowerHigh = _src[_pivotLookbackRight] < ta.valuewhen(tmpPivotHighFound, _src[_pivotLookbackRight], 1) and _funcRange(tmpPivotHighFound[1], _pivotLookbackRangeMin, _pivotLookbackRangeMax)
+    // Price: Higher High
+    tmpPriceHigherHigh = high[_pivotLookbackRight] > ta.valuewhen(tmpPivotHighFound, high[_pivotLookbackRight], 1)
+    tmpBearishCondition = tmpPriceHigherHigh and tmpOscillatorLowerHigh and tmpPivotHighFound
+
+    [tmpPivotLowFound, tmpPivotHighFound, tmpOscillatorHigherLow, tmpPriceLowerLow, tmpBullishCondition, tmpOscillatorLowerHigh, tmpPriceHigherHigh, tmpBearishCondition]
+
+_funcHistogram(_type, _src, _len) =>
+    tmpHistogramSignal = _funcCalcMA(_type, _src, _len)
+    tmpHistogram = _src - tmpHistogramSignal
+    iff_1 = tmpHistogram > nz(tmpHistogram[1]) ? valColorsGreen : valColorsGreenDark
+    iff_2 = tmpHistogram < nz(tmpHistogram[1]) ? valColorsRed : valColorsRedDark
+    tmpHistogramColor = tmpHistogram > 0 ? iff_1 : iff_2
+
+    [tmpHistogram, tmpHistogramColor]
+
+
+//********** Inputs
+inputCalculationSource = input(title='Calculation Source', defval=hlc3)
+
+// Histogram
+string inputHistogramVariant = input.string(title='Histogram: Variant', group="Histogram", defval='RSI', options=['DISABLED', 'RSI', 'RSX'])
+string inputHistogramType = input.string(title='Histogram: MA Type', group="Histogram", defval='SMA', options=['DISABLED', 'COVWMA', 'DEMA', 'EMA', 'EHMA', 'FRAMA', 'HMA', 'KAMA', 'Karobein', 'RMA', 'SMA', 'SMMA', 'TEMA', 'VIDYA', 'VWMA', 'WMA'])
+int inputHistogramLength = input.int(title='Histogram: Period', group="Histogram", defval=8, maxval=100)
+
+// RSI
+bool inputRsiEnable = input(title='RSI: On/Off', group="RSI", defval=true)
+bool inputRsiEnableVolumeBased = input(title='RSI: Volume Based Calculation On/Off', group="RSI", defval=false)
+bool inputRsiEnableDivergence = input(title='RSI: Show Divergence On/Off', group="RSI", defval=true)
+bool inputRsiEnableObLevel = input(title='RSI: Show Overboard/Oversold Breakouts On/Off', group="RSI", defval=false)
+int inputRsiLength = input.int(title='RSI: Period', group="RSI", minval=1, defval=14)
+string inputRsiSmoothingType = input.string(title='RSI: Smoothing Type', group="RSI", defval='DISABLED', options=['DISABLED', 'COVWMA', 'DEMA', 'EMA', 'EHMA', 'FRAMA', 'HMA', 'KAMA', 'Karobein', 'RMA', 'SMA', 'SMMA', 'TEMA', 'VIDYA', 'VWMA', 'WMA'])
+int inputRsiSmoothingPeriod = input.int(title='RSI: Smoothing Period', group="RSI", minval=1, defval=5)
+int inputRsiLineWidth = input.int(title='RSI: Line Width', group="RSI", minval=1, defval=2)
+int inputRsiTransparency = input.int(title='RSI: Transparency', group="RSI", defval=0, maxval=100)
+color inputRsiColorBreakoutDefault = input(title='RSI: Color', group="RSI", defval=valColorsPurple)
+color inputRsiColorBreakoutOverbought = input(title='RSI: Color Overbought', group="RSI", defval=valColorsRed)
+color inputRsiColorBreakoutOversold = input(title='RSI: Color Oversold', group="RSI", defval=valColorsGreen)
+
+// RSX
+bool inputRsxEnable = input(title='RSX: On/Off', group="RSX", defval=true)
+bool inputRsxEnableVolumeBased = input(title='RSX: Volume Based Calculation On/Off', group="RSX", defval=false)
+bool inputRsxEnableDivergence = input(title='RSX: Show Divergence On/Off', group="RSX", defval=false)
+bool inputRsxEnableObLevel = input(title='RSX: Show Overboard/Oversold Breakouts On/Off', group="RSX", defval=false)
+int inputRsxLength = input.int(title='RSX: Period', group="RSX", minval=1, defval=14)
+string inputRsxSmoothingType = input.string(title='RSX: Smoothing Type', group="RSX", defval='DISABLED', options=['DISABLED', 'COVWMA', 'DEMA', 'EMA', 'EHMA', 'FRAMA', 'HMA', 'KAMA', 'Karobein', 'RMA', 'SMA', 'SMMA', 'TEMA', 'VIDYA', 'VWMA', 'WMA'])
+int inputRsxSmoothingPeriod = input.int(title='RSX: Smoothing Period', group="RSX", minval=1, defval=5)
+int inputRsxLineWidth = input.int(title='RSX: Line Width', group="RSX", minval=1, defval=2)
+int inputRsxTransparency = input.int(title='RSX: Transparency', group="RSX", defval=0, maxval=100)
+color inputRsxColorBreakoutDefault = input(title='RSX: Color', group="RSX", defval=valColorsAquaDark)
+color inputRsxColorBreakoutOverbought = input(title='RSX: Color Overbought', group="RSX", defval=valColorsRed)
+color inputRsxColorBreakoutOversold = input(title='RSX: Color Oversold', group="RSX", defval=valColorsGreen)
+
+// Divergence Identification
+int inputPivotLookbackLeft = input(title='Divergence: Pivot Lookback Left', group="Divergence Identification", defval=5)
+int inputPivotLookbackRight = input(title='Divergence: Pivot Lookback Right', group="Divergence Identification", defval=5)
+int inputPivotLookbackRangeMin = input(title='Divergence: Min Lookback Range', group="Divergence Identification", defval=5)
+int inputPivotLookbackRangeMax = input(title='Divergence: Max Lookback Range', group="Divergence Identification", defval=18)
+
+// Levels: displaying Overbought, Oversold and Crossline Level
+bool inputLevelEnable = input(title='Level: On/Off', group="Levels", defval=true)
+int inputLevelOverBought = input(title='Level: Overbought', group="Levels", defval=70)
+int inputLevelOverSold = input(title='Level: Oversold', group="Levels", defval=30)
+int inputLevelCrossLine = input(title='Level: Crossline', group="Levels", defval=50)
+int inputLevelTransparency = input.int(title='Level: Transparency', group="Levels", defval=90, maxval=100)
+
+
+//********** Calculation
+
+float volumeBased = ta.cum(ta.change(inputCalculationSource) * volume)
+
+// RSI
+float inputCalculationSourceRsi = inputRsiEnableVolumeBased ? volumeBased : inputCalculationSource
+[valRsi, valRsiColor] = _funcRSI(inputCalculationSourceRsi, inputRsiLength, inputRsiEnableObLevel, inputLevelOverBought, inputLevelOverSold, inputRsiColorBreakoutDefault, inputRsiColorBreakoutOverbought, inputRsiColorBreakoutOversold, inputRsiSmoothingType, inputRsiSmoothingPeriod)
+
+// RSI: Pivot
+[valRsiPivotLowFound, valRsiPivotHighFound, valRsiPivotOscillatorHigherLow, valRsiPivotPriceLowerLow, valRsiPivotBullishCondition, valRsiPivotOscillatorLowerHigh, valRsiPivotPriceHigherHigh, valRsiPivotBearishCondition] = _funcPivot(valRsi, inputPivotLookbackLeft, inputPivotLookbackRight, inputPivotLookbackRangeMin, inputPivotLookbackRangeMax)
+
+
+// RSX
+float inputCalculationSourceRsx = inputRsxEnableVolumeBased ? volumeBased : inputCalculationSource
+[valRsx, valRsxColor] = _funcRSX(inputCalculationSourceRsx, inputRsxLength, inputRsxEnableObLevel, inputLevelOverBought, inputLevelOverSold, inputRsxColorBreakoutDefault, inputRsxColorBreakoutOverbought, inputRsxColorBreakoutOversold, inputRsxSmoothingType, inputRsxSmoothingPeriod)
+
+// RSX: Pivot
+[valRsxPivotLowFound, valRsxPivotHighFound, valRsxPivotOscillatorHigherLow, valRsxPivotPriceLowerLow, valRsxPivotBullishCondition, valRsxPivotOscillatorLowerHigh, valRsxPivotPriceHigherHigh, valRsxPivotBearishCondition] = _funcPivot(valRsx, inputPivotLookbackLeft, inputPivotLookbackRight, inputPivotLookbackRangeMin, inputPivotLookbackRangeMax)
+
+// Histogram
+valHistogramSource = inputHistogramVariant == 'RSI' ? valRsi : inputHistogramVariant == 'RSX' ? valRsx : na
+[valHistogram, valHistogramColor] = _funcHistogram(inputHistogramType, valHistogramSource, inputHistogramLength)
+
+
+
+
+//************  Plotting
+
+//**** Levels
+valLineOverBought = hline(inputLevelEnable ? inputLevelOverBought : na, title='Overbought', color=color.new(color.gray, 65), linestyle=hline.style_dashed, linewidth=1)
+valLineOverSold = hline(inputLevelEnable ? inputLevelOverSold : na, title='Oversold', color=color.new(color.gray, 45), linestyle=hline.style_dashed, linewidth=1)
+valLineCross = hline(inputLevelEnable ? inputLevelCrossLine : na, title='Cross', color=color.new(color.gray, 65), linestyle=hline.style_dashed, linewidth=1)
+fill(valLineOverBought, valLineOverSold, color=color.new(valColorsPink, inputLevelTransparency), editable=false)
+
+
+//**** RSI Histogram
+plot((inputHistogramVariant != 'DISABLED') ? valHistogram : na, style=plot.style_columns, color=valHistogramColor, linewidth=2)
+
+
+//**** RSI
+plot(inputRsiEnable ? valRsi : na, title='RSI', color=color.new(valRsiColor, inputRsiTransparency), linewidth=inputRsiLineWidth, style=plot.style_line)
+
+plot(inputRsiEnable and inputRsiEnableDivergence and valRsiPivotLowFound ? valRsi[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bullish', linewidth=3, color=valRsiPivotBullishCondition ? valColorsBullColor : valColorsNaColor)
+
+plotshape(inputRsiEnable and inputRsiEnableDivergence and valRsiPivotBullishCondition ? valRsi[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bullish Label', text='Bull', style=shape.labelup, location=location.absolute, color=color.new(valColorsBullColor, 0), textcolor=color.new(valColorsTextColor, 0))
+
+plot(inputRsiEnable and inputRsiEnableDivergence and valRsiPivotHighFound ? valRsi[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bearish', linewidth=3, color=valRsiPivotBearishCondition ? valColorsBearColor : valColorsNaColor)
+
+plotshape(inputRsiEnable and inputRsiEnableDivergence and valRsiPivotBearishCondition ? valRsi[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bearish Label', text='Bear', style=shape.labeldown, location=location.absolute, color=color.new(valColorsBearColor, 0), textcolor=color.new(valColorsTextColor, 0))
+
+
+//**** RSX
+plot(inputRsxEnable ? valRsx : na, title='RSX', linewidth=inputRsxLineWidth, color=color.new(valRsxColor, inputRsxTransparency))
+
+plot(inputRsxEnable and inputRsxEnableDivergence and valRsxPivotLowFound ? valRsx[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bullish', linewidth=3, color=valRsxPivotBullishCondition ? valColorsBullColorDark : valColorsNaColor)
+
+plotshape(inputRsxEnable and inputRsxEnableDivergence and valRsxPivotBullishCondition ? valRsx[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bullish Label', text='Bull', style=shape.labelup, location=location.absolute, color=color.new(valColorsBullColorDark, 0), textcolor=color.new(valColorsTextColor, 0))
+
+plot(inputRsxEnable and inputRsxEnableDivergence and valRsxPivotHighFound ? valRsx[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bearish', linewidth=3, color=valRsxPivotBearishCondition ? valColorsBearColorDark : valColorsNaColor)
+
+plotshape(inputRsxEnable and inputRsxEnableDivergence and valRsxPivotBearishCondition ? valRsx[inputPivotLookbackRight] : na, offset=-inputPivotLookbackRight, title='Regular Bearish Label', text='Bear', style=shape.labeldown, location=location.absolute, color=color.new(valColorsBearColorDark, 0), textcolor=color.new(valColorsTextColor, 0))

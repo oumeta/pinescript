@@ -1,0 +1,201 @@
+//@version=5
+indicator(title="Jurik DMX Histogram [Loxx]", shorttitle="JDMXH [Loxx]", timeframe="", timeframe_gaps=true, overlay = false)
+
+greencolor = #2DD204
+redcolor = #D2042D 
+bluecolor = #042dd2
+
+lightgreencolor = #96E881 
+lightredcolor =  #DF4F6C
+lightbluecolor =  #4f6cdf
+
+darkGreenColor =  #1B7E02 
+darkRedColor = #93021F
+darkBlueColor = #021f93
+
+_f_hp(_src, max_len) =>
+    var c = 360 * math.pi / 180
+    _alpha = (1 - math.sin(c / max_len)) / math.cos(c / max_len)
+    _hp = 0.0
+    _hp := 0.5 * (1 + _alpha) * (_src - nz(_src[1])) + _alpha * nz(_hp[1])
+    _hp
+
+_f_ess(_src, _len) =>
+    var s = 1.414
+    _a = math.exp(-s * math.pi / _len)
+    _b = 2 * _a * math.cos(s *  math.pi  / _len)
+    _c2 = _b
+    _c3 = -_a * _a
+    _c1 = 1 - _c2 - _c3
+    _out = 0.0
+    _out := _c1 * (_src + nz(_src[1])) / 2 + _c2 * nz(_out[1], nz(_src[1], _src)) + _c3 * nz(_out[2], nz(_src[2], nz(_src[1], _src)))
+    _out
+
+_auto_dom(src, min_len, max_len, ave_len) =>
+    var c = 2 * math.pi
+    var s = 1.414
+    avglen = ave_len
+
+    filt = _f_ess(_f_hp(src, max_len), min_len)
+    arr_size = max_len * 2
+    
+    var corr = array.new_float(arr_size, initial_value=0)
+    var cospart = array.new_float(arr_size, initial_value=0)
+    var sinpart = array.new_float(arr_size, initial_value=0)
+    var sqsum = array.new_float(arr_size, initial_value=0)
+    var r1 = array.new_float(arr_size, initial_value=0)
+    var r2 = array.new_float(arr_size, initial_value=0)
+    var pwr = array.new_float(arr_size, initial_value=0)
+    
+    for lag = 0 to max_len by 1
+        m = avglen == 0 ? lag : avglen
+        Sx = 0.0, Sy = 0.0,  Sxx = 0.0, Syy = 0.0, Sxy = 0.0
+        for i = 0 to m - 1 by 1
+            x = nz(filt[i])
+            y = nz(filt[lag + i])
+            Sx += x
+            Sy += y
+            Sxx += x * x
+            Sxy += x * y
+            Syy += y * y
+            Syy
+        if (m * Sxx - Sx * Sx) * (m * Syy - Sy * Sy) > 0
+            array.set(corr, lag, (m * Sxy - Sx * Sy) / math.sqrt((m * Sxx - Sx * Sx) * (m * Syy - Sy * Sy)))
+    
+    for period = min_len to max_len by 1
+        array.set(cospart, period, 0)
+        array.set(sinpart, period, 0)
+        for n = ave_len to max_len by 1
+            array.set(cospart, period, nz(array.get(cospart, period)) + nz(array.get(corr, n)) * math.cos(c * n / period))
+            array.set(sinpart, period, nz(array.get(sinpart, period)) + nz(array.get(corr, n)) * math.sin(c * n / period))
+        array.set(sqsum, period, math.pow(nz(array.get(cospart, period)), 2) + math.pow(nz(array.get(sinpart, period)), 2))
+    
+    for period = min_len to max_len by 1
+        array.set(r2, period, nz(array.get(r1, period)))
+        array.set(r1, period, 0.2 * math.pow(nz(array.get(sqsum, period)), 2) + 0.8 * nz(array.get(r2, period)))
+
+    maxpwr = 0.0
+    
+    for period = min_len to max_len by 1
+        if nz(array.get(r1, period)) > maxpwr
+            maxpwr := nz(array.get(r1, period))
+
+    for period = ave_len to max_len by 1
+        array.set(pwr, period, nz(array.get(r1, period)) / maxpwr)
+    
+    dominantcycle = 0.0, peakpwr = 0.0
+    
+    for period = min_len to max_len by 1
+        if nz(array.get(pwr, period)) > peakpwr 
+            peakpwr := nz(array.get(pwr, period))
+
+    spx = 0.0, sp = 0.0
+
+    for period = min_len to max_len by 1
+        if peakpwr >= 0.25 and nz(array.get(pwr, period)) >= 0.25
+            spx += period * nz(array.get(pwr, period))
+            sp += nz(array.get(pwr, period))
+
+    dominantcycle := sp != 0 ? spx / sp : dominantcycle
+    dominantcycle := sp < 0.25  ?  dominantcycle[1] : dominantcycle
+    dominantcycle := dominantcycle < 1 ? 1 : dominantcycle 
+    dom_in = math.min(math.max(dominantcycle, min_len), max_len)
+    dom_in
+    
+_a_jurik_filt(src, len, phase) =>
+    len1 = math.max(math.log(math.sqrt(0.5 * (len-1))) / math.log(2.0) + 2.0, 0)
+    pow1 = math.max(len1 - 2.0, 0.5)
+    volty = 7.0, avolty = 9.0, vsum = 8.0, bsmax = 5.0, bsmin = 6.0, avgLen = 65
+    
+    del1 = src - nz(bsmax[1])
+    del2 = src - nz(bsmin[1])
+    
+    div = 1.0 / (10.0 + 10.0 * (math.min(math.max(len-10, 0), 100)) / 100)
+    volty := math.abs(del1) > math.abs(del2) ? math.abs(del1) : math.abs(del2)
+    vsum := nz(vsum[1]) + div * (volty - nz(volty[10]))
+    
+    temp_avg = ta.sma(vsum, avgLen)
+    
+    y = bar_index + 1
+    if(y <= avgLen + 1)
+        avolty := nz(avolty[1]) + 2.0 * (vsum - nz(avolty[1])) / (avgLen + 1)	   
+    else
+        avolty := temp_avg
+
+    dVolty = avolty > 0 ? volty / avolty : 0
+    dVolty := dVolty > math.pow(len1, 1.0/pow1) ? math.pow(len1, 1.0/pow1) : dVolty
+    dVolty := dVolty < 1 ? 1 : dVolty
+    pow2 = math.pow(dVolty, pow1)
+    len2 = math.sqrt(0.5 * (len - 1)) * len1
+    Kv = math.pow(len2 / (len2 + 1), math.sqrt(pow2))
+    
+    bsmax := del1 > 0 ? src : src - Kv * del1
+    bsmin := del2 < 0 ? src : src - Kv * del2
+    
+    phaseRatio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+    beta = 0.45 * (len - 1) / (0.45 * (len - 1) + 2)
+    alpha = math.pow(beta, pow2)
+    jma1 = 0.0, e0 = 0.0, e1 = 0.0, e2 = 0.0
+    e0 := (1 - alpha) * src + alpha * nz(e0[1])
+    e1 := (src - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 := (e0 + phaseRatio * e1 - nz(jma1[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    jma1 := e2 + nz(jma1[1])
+    jma1
+
+adapt = input.string("Fixed", "Calculation type", options = ["Fixed", "Autocorrelation Adaptive"], group = "Basic Settings")
+
+len = input.int(32, minval=1, title="Length", group = "Basic Settings")
+phs = input.int(0, title= "Jurik Phase", group = "Basic Settings")
+siglen = input.int(5, minval=1, title="Signal Smoothing Length", group = "Basic Settings")
+
+auto_src = input.source(close, title='JMA Source', group = "Autocorrelation Periodgram Algorithm")
+auto_min = input.int(8, minval = 1, title='JMA Min Length', group = "Autocorrelation Periodgram Algorithm")
+auto_max = input.int(50, minval = 1, title='JMA Max Length', group = "Autocorrelation Periodgram Algorithm")
+auto_avg = input.int(32, minval = 1, title='JMA Average Length', group = "Autocorrelation Periodgram Algorithm")
+
+colorbars = input.bool(false, "Color bars?", group = "UI Options")
+
+auto = _auto_dom(auto_src, auto_min, auto_max, auto_avg)
+out = adapt == "Fixed" ? len : int(auto) < 1 ? 1 : int(auto) 
+
+up = ta.change(high)
+down = -ta.change(low)
+
+plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+
+trur = _a_jurik_filt(ta.tr, out, phs)
+
+plus = fixnan(100 * _a_jurik_filt(plusDM, out, phs) / trur)
+minus = fixnan(100 * _a_jurik_filt(minusDM, out, phs) / trur)
+
+trigger = plus-minus
+signal = _a_jurik_filt(trigger, siglen, phs)
+
+colorout = 
+     trigger >= 0 and trigger >= signal ? greencolor  : 
+     trigger >= 0 and trigger < signal ? lightgreencolor  : 
+     trigger < 0 and trigger < signal ? redcolor : 
+     lightredcolor 
+
+plot(trigger, color=colorout, title = "DMX", style = plot.style_histogram)
+plot(trigger, color = trigger >= 0 ? darkGreenColor : darkRedColor , title = "DMX", linewidth = 1)
+plot(signal, color = color.white, title = "Signal", linewidth = 2)
+
+barcolor(colorbars ? colorout : na)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
